@@ -51,7 +51,7 @@ warlord import-rules te_rulebook_web.pdf --kind rulebook --ruleset thunders_edge
 
 The LRR import gives one chunk per topic (`lrr.82`) and per sub-rule (`lrr.82.2`), with related topics linked. On LRR 2.0 that is all 101 topics and 509 sub-rules; rule 58.1 does not exist in the PDF itself. The page list for the TE rulebook skips its fiction, component pages and map appendix. Each remaining ALL-CAPS section becomes one chunk (`te.coexist`, `te.the_fracture`, `te.clarifications`, and so on). Ids should follow the LRR numbering so citations read naturally, for example `lrr.89.1`.
 
-The engine cites rules by topic (see `TOPICS` in `engine/validate.py`). `data/lrr_refs.json` pins each topic to its LRR 2.0 rule ids (ids only, no text). The CLI loads it, and a pinned id is used only when the knowledge base holds it. Otherwise, for example with the sample data, the engine falls back to the best search match.
+The engine cites rules by topic (see `TOPICS` in `engine/validate.py`). `src/warlord/data/lrr_refs.json` pins each topic to its LRR 2.0 rule ids (ids only, no text). The CLI loads it, and a pinned id is used only when the knowledge base holds it. Otherwise, for example with the sample data, the engine falls back to the best search match.
 
 ## Games from AsyncTI4
 

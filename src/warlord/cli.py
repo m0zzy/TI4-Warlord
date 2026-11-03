@@ -30,6 +30,7 @@ def _ctx(args) -> ToolContext:
     from warlord.ruleset import V1_RULESETS
 
     from warlord.engine.validate import load_ref_overrides
+    from warlord.paths import LRR_REFS
 
     return ToolContext(
         kb=_kb(args.kb),
@@ -37,7 +38,7 @@ def _ctx(args) -> ToolContext:
         game_id=args.game,
         viewer=args.viewer,
         default_ruleset=V1_RULESETS[args.ruleset],
-        ref_overrides=load_ref_overrides("data/lrr_refs.json"),
+        ref_overrides=load_ref_overrides(LRR_REFS),
     )
 
 
@@ -138,6 +139,31 @@ def cmd_set_hand(args) -> int:
     return 0
 
 
+def cmd_setup(args) -> int:
+    from warlord.paths import data_dir
+    from warlord.setup import SetupError, run_setup, summary_json
+
+    try:
+        report = run_setup(
+            data_dir(args.data),
+            lrr=args.lrr,
+            te_rulebook=args.te_rulebook,
+            asyncti4=args.asyncti4,
+            download=args.download_asyncti4,
+        )
+    except SetupError as e:
+        print(f"setup failed: {e}", file=sys.stderr)
+        return 2
+    print(summary_json(report))
+    return 0 if report.ok else 1
+
+
+def cmd_mcp(args) -> int:
+    from warlord.mcp_server import main as mcp_main
+
+    return mcp_main(["--data", args.data] if args.data else [])
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="warlord", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -200,6 +226,18 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--promissory-notes")
     h.add_argument("--secret-objectives")
     h.set_defaults(func=cmd_set_hand)
+
+    su = sub.add_parser("setup", help="build the knowledge base from your rules PDFs and AsyncTI4 data")
+    su.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
+    su.add_argument("--lrr", help="Living Rules Reference PDF")
+    su.add_argument("--te-rulebook", help="Thunder's Edge rulebook PDF")
+    su.add_argument("--asyncti4", help="AsyncTI4 bot checkout, or its src/main/resources/data folder")
+    su.add_argument("--download-asyncti4", action="store_true", help="sparse-clone the AsyncTI4 data with git")
+    su.set_defaults(func=cmd_setup)
+
+    m = sub.add_parser("mcp", help="run the MCP server over stdio")
+    m.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
+    m.set_defaults(func=cmd_mcp)
 
     r = sub.add_parser("import-rules", help="convert an official rules PDF to KB rule records")
     r.add_argument("pdf")

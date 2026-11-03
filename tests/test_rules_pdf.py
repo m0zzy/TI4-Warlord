@@ -1,4 +1,5 @@
 from warlord.engine.validate import kb_ref_resolver, load_ref_overrides
+from warlord.paths import LRR_REFS
 from warlord.kb.importers.rules_pdf import parse_lrr, parse_rulebook
 from warlord.kb.store import KnowledgeBase
 
@@ -62,7 +63,7 @@ def test_parse_rulebook_sections():
 
 
 def test_pinned_refs_used_only_when_loaded():
-    overrides = load_ref_overrides("data/lrr_refs.json")
+    overrides = load_ref_overrides(LRR_REFS)
     assert overrides["movement.origin"] == ["lrr.89.2"]
     kb = KnowledgeBase()
     kb.add({"kind": "rule", "id": "lrr.89.2", "ruleset": "base", "title": "Tactical Action: Step 2—Movement", "text": "move"})

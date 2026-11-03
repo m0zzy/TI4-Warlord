@@ -336,7 +336,7 @@ def validate_action(
 def kb_ref_resolver(kb, ruleset=None, overrides: dict[str, list[str]] | None = None) -> RefResolver:
     """Resolve engine topics to rule ids.
 
-    Pinned ids (``overrides``, e.g. data/lrr_refs.json) win when the knowledge
+    Pinned ids (``overrides``, e.g. warlord/data/lrr_refs.json) win when the knowledge
     base holds them; otherwise the best-matching rule chunks are used.
     """
     overrides = overrides or {}

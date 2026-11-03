@@ -39,7 +39,39 @@ src/warlord/
 data/sample/            sample game + sample KB (paraphrased placeholders, not the LRR)
 ```
 
-## Quick start
+## Use it from Claude (MCP)
+
+1. Install, with PDF support for the rules import:
+
+   ```bash
+   pip install -e '.[pdf]'
+   ```
+
+2. Build your knowledge base from your own copies of the rules. Download the [Living Rules Reference 2.0](https://images-cdn.fantasyflightgames.com/filer_public/51/55/51552c7f-c05c-445b-84bf-4b073456d008/ti10_pok_living_rules_reference_20_web.pdf) and the [Thunder's Edge rulebook](https://images-cdn.fantasyflightgames.com/filer_public/ca/e7/cae7706f-cdb5-4ee1-a20c-7f76a13d135c/te_rulebook_web.pdf) from Fantasy Flight Games, then:
+
+   ```bash
+   warlord setup --lrr ti10_pok_living_rules_reference_20_web.pdf --te-rulebook te_rulebook_web.pdf --download-asyncti4
+   ```
+
+   `--download-asyncti4` sparse-clones the AsyncTI4 card data with git; pass `--asyncti4 PATH` instead if you already have a checkout. Everything goes to `~/.local/share/warlord` (or `$WARLORD_DATA`, or `--data DIR`). The report ends with checks such as "101 LRR topics" and "every engine rule reference is in the LRR".
+
+3. Connect it to your client.
+
+   In **Claude Code**:
+
+   ```bash
+   claude mcp add warlord -- warlord mcp
+   ```
+
+   In **Claude Desktop**, add this to `claude_desktop_config.json`:
+
+   ```json
+   {"mcpServers": {"warlord": {"command": "warlord", "args": ["mcp"]}}}
+   ```
+
+4. Ask a question. Use the `referee` prompt, or just ask: "Import AsyncTI4 game pbd12345, I'm ghost: can my carrier in 205 reach 301 this turn?" The agent calls `fetch_live_game`, `open_game`, `set_my_hand` (it will ask for your cards), `get_state`, the lookups and `validate_action`, and repeats the engine's status line.
+
+## Quick start (command line)
 
 ```bash
 pip install -e '.[dev]'
@@ -63,7 +95,11 @@ warlord validate '{"type":"tactical","player":"p3","activate":"201","moves":[{"f
 warlord combat '{"units":{"dreadnought":2,"carrier":1,"fighter":3}}' '{"units":{"cruiser":2,"destroyer":1,"pds":1}}'
 ```
 
-Ask the referee. This calls the Claude API, so it needs `ANTHROPIC_API_KEY` or an `ant auth login` profile:
+Ask the built-in referee (API-key mode, for later). It calls the Claude API, so it needs the `api` extra and `ANTHROPIC_API_KEY`:
+
+```bash
+pip install -e '.[api]'
+```
 
 ```bash
 warlord ask "Can my cruiser in 101 join an attack on 201 this turn?" --game pbd00000 --viewer p3

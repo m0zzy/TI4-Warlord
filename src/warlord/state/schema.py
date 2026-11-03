@@ -222,7 +222,9 @@ class LogEvent(_Model):
 
 class Meta(_Model):
     game_id: str
-    source: Literal["asyncti4", "manual", "engine", "test"] = "manual"
+    # "asyncti4_export" games carry every player's hidden cards; the MCP server
+    # never opens them.
+    source: Literal["asyncti4", "asyncti4_export", "manual", "engine", "test"] = "manual"
     players: int
     vp_target: int = 10
 

@@ -132,8 +132,23 @@ def _validate_action(ctx: ToolContext, args: dict) -> dict:
     if "player" not in action:
         action = {**action, "player": view.turn.active_player or ctx.viewer}
     result = validate_action(view, action, ctx.resolver()).to_dict()
+    result["status_line"] = status_line(result)
     ctx.coverage.append({"tool": "validate_action", "coverage": result["coverage"], "legal": result["legal"]})
     return result
+
+
+def status_line(result: dict) -> str:
+    """One line the agent can repeat to the player as-is."""
+    if result.get("schema_errors"):
+        return "Not checked: the move is not in the engine's action format."
+    if result["legal"] is False:
+        v = result["violations"][0]
+        refs = f" ({', '.join(v['refs'])})" if v.get("refs") else ""
+        more = f" (+{len(result['violations']) - 1} more)" if len(result["violations"]) > 1 else ""
+        return f"Illegal, engine-verified: {v['message']}{refs}{more}"
+    if result["legal"] is True:
+        return "Legal, engine-verified."
+    return "Not verified by the engine. Unchecked: " + "; ".join(result.get("unchecked") or ["unknown"]) + "."
 
 
 def _combat_sim(ctx: ToolContext, args: dict) -> dict:

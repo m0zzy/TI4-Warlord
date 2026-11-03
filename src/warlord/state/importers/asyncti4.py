@@ -657,7 +657,9 @@ def from_save(
     law_elected = _pairs(game.get("law_info"))
     state = GameState(
         ruleset=ruleset,
-        meta=Meta(game_id=game_name, source="asyncti4", players=len(players), vp_target=int(game.get("vp_count") or 10)),
+        meta=Meta(
+            game_id=game_name, source="asyncti4_export", players=len(players), vp_target=int(game.get("vp_count") or 10)
+        ),
         turn=TurnState(
             round=int(game.get("round") or 1),
             phase=phase,  # type: ignore[arg-type]
