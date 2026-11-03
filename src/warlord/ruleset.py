@@ -32,7 +32,13 @@ class Ruleset(BaseModel):
     # Card type -> deck id (e.g. "action_card" -> "deck.action_cards_te"). When
     # set and the deck is loaded, lookups of that type only return the deck's
     # cards. Faction cards are never filtered by decks.
-    decks: dict[str, str] = Field(default_factory=dict)
+    decks: dict[str, str | list[str]] = Field(default_factory=dict)
+
+    def deck_ids(self, card_type: str) -> list[str]:
+        ref = self.decks.get(card_type)
+        if ref is None:
+            return []
+        return [ref] if isinstance(ref, str) else list(ref)
 
     def allows(self, tag: str) -> bool:
         """True when content tagged ``tag`` is legal in this ruleset."""
@@ -52,11 +58,14 @@ POK_RULESET = Ruleset(
         "relic": "deck.relics_pok",
         "agenda": "deck.agendas_pok",
         "strategy_card": "deck.sc_set.pok",
+        "objective": ["deck.public_stage_1_objectives_pok", "deck.public_stage_2_objectives_pok"],
+        "secret_objective": "deck.secret_objectives_pok",
+        "exploration": "deck.explores_pok",
     },
 )
 
 # Thunder's Edge + PoK as AsyncTI4 sets it up by default: the TE action card and
-# relic decks, the PoK + Codex tech deck, PoK agendas, and
+# relic decks, the PoK + Codex tech deck, PoK agendas, objectives and explores, and
 # the TE strategy card set. Codex content enters only through these decks.
 THUNDERS_EDGE_RULESET = Ruleset(
     base=True,
@@ -70,6 +79,9 @@ THUNDERS_EDGE_RULESET = Ruleset(
         "relic": "deck.relics_pok_te",
         "agenda": "deck.agendas_pok",
         "strategy_card": "deck.sc_set.te",
+        "objective": ["deck.public_stage_1_objectives_pok", "deck.public_stage_2_objectives_pok"],
+        "secret_objective": "deck.secret_objectives_pok",
+        "exploration": "deck.explores_pok",
     },
 )
 

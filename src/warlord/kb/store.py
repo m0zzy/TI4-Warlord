@@ -56,6 +56,7 @@ class KnowledgeBase:
     _bm25: BM25 | None = field(default=None, init=False, repr=False)
     _vectors: list[list[float]] | None = field(default=None, init=False, repr=False)
     _deck_sets: dict[str, frozenset[str]] = field(default_factory=dict, init=False, repr=False)
+    _supersession: dict[str, list[str]] | None = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------ loading
 
@@ -86,6 +87,7 @@ class KnowledgeBase:
             raise DuplicateRecord(item.id)
         self.records[item.id] = item
         self._bm25 = None
+        self._supersession = None
 
     def add_many(self, items: Iterable[Record | ErrataPatch | Deck | dict]) -> None:
         for item in items:
@@ -122,11 +124,43 @@ class KnowledgeBase:
             return True
         if not ruleset.allows(record.ruleset):
             return False
-        if isinstance(record, ComponentCard) and record.faction is None:
-            deck_id = ruleset.decks.get(record.type)
-            if deck_id and deck_id in self.decks:
-                return record.id in self._deck_set(deck_id)
+        if not self._in_content(record, ruleset):
+            return False
+        # Hide older printings when a newer one is part of this game's content.
+        for newer in self._superseded_by().get(record.id, ()):
+            rec = self.records.get(newer)
+            if rec is not None and self._in_content(rec, ruleset):
+                return False
         return True
+
+    def _in_content(self, record: Record, ruleset: Ruleset) -> bool:
+        """Tag and deck checks, without supersession."""
+        if not ruleset.allows(record.ruleset):
+            return False
+        if isinstance(record, ComponentCard) and record.faction is None:
+            loaded = [d for d in ruleset.deck_ids(record.type) if d in self.decks]
+            if loaded:
+                return any(record.id in self._deck_set(d) for d in loaded)
+        return True
+
+    def _superseded_by(self) -> dict[str, list[str]]:
+        """older id -> newer ids, following chains (a -> b -> c gives a: [b, c])."""
+        if self._supersession is None:
+            direct: dict[str, list[str]] = {}
+            for r in self.records.values():
+                for old in getattr(r, "supersedes", []) or []:
+                    direct.setdefault(old, []).append(r.id)
+            full: dict[str, list[str]] = {}
+            for old in direct:
+                seen, stack = [], list(direct[old])
+                while stack:
+                    n = stack.pop()
+                    if n not in seen:
+                        seen.append(n)
+                        stack.extend(direct.get(n, []))
+                full[old] = seen
+            self._supersession = full
+        return self._supersession
 
     def _deck_set(self, deck_id: str) -> frozenset[str]:
         if deck_id not in self._deck_sets:
@@ -212,7 +246,8 @@ class KnowledgeBase:
                 for r in self.records.values()
                 if isinstance(r, ComponentCard) and self._allowed(r, ruleset)
             ),
-            key=lambda t: -t[0],
+            # Ties go to cards over map tiles: "Quann" the planet, not tile 25.
+            key=lambda t: (-t[0], t[1].type == "tile"),
         )
         scored = [(s, r) for s, r in scored if s >= 0.55][:k]
         excluded = self._excluded_match(name_or_id, ruleset) if (not scored or scored[0][0] < 0.9) else None

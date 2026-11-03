@@ -108,6 +108,9 @@ class ComponentCard(_Model):
     engine_ops: dict | None = None
     errata: list[str] = Field(default_factory=list)  # ids of applied patches
     source_ref: str | None = None  # where the record came from (e.g. asyncti4 alias)
+    # Older printings this record replaces (e.g. a Thunder's Edge leader over its
+    # PoK version). Hidden whenever this record is part of the game's content.
+    supersedes: list[str] = Field(default_factory=list)
 
 
 class Deck(_Model):

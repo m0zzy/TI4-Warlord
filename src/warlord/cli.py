@@ -29,12 +29,15 @@ def _ctx(args) -> ToolContext:
     store = GameStore(args.games) if args.game else None
     from warlord.ruleset import V1_RULESETS
 
+    from warlord.engine.validate import load_ref_overrides
+
     return ToolContext(
         kb=_kb(args.kb),
         store=store,
         game_id=args.game,
         viewer=args.viewer,
         default_ruleset=V1_RULESETS[args.ruleset],
+        ref_overrides=load_ref_overrides("data/lrr_refs.json"),
     )
 
 
@@ -77,6 +80,28 @@ def cmd_import(args) -> int:
     report = import_checkout(args.data_dir, include=args.include)
     path = write_jsonl([*report.records, *report.decks], args.out)
     print(json.dumps({**report.summary(), "written": str(path)}, indent=2))
+    return 0
+
+
+def _page_list(spec: str | None) -> list[int] | None:
+    """Turn "3,5-12,15" (1-based, as PDF viewers number pages) into zero-based indexes."""
+    if not spec:
+        return None
+    pages: list[int] = []
+    for part in spec.split(","):
+        lo, _, hi = part.strip().partition("-")
+        pages.extend(range(int(lo) - 1, int(hi or lo)))
+    return pages
+
+
+def cmd_import_rules(args) -> int:
+    from warlord.kb.importers.asyncti4 import write_jsonl
+    from warlord.kb.importers.rules_pdf import import_pdf
+
+    chunks = import_pdf(args.pdf, kind=args.kind, ruleset=args.ruleset, pages=_page_list(args.pages))
+    path = write_jsonl(chunks, args.out)  # type: ignore[arg-type]
+    topics = sum(1 for c in chunks if c.parent is None)
+    print(json.dumps({"chunks": len(chunks), "top_level": topics, "written": str(path)}, indent=2))
     return 0
 
 
@@ -127,6 +152,14 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--out", default="data/private/kb/components.asyncti4.jsonl")
     i.add_argument("--include", nargs="+", default=["base", "pok", "codex", "thunders_edge"])
     i.set_defaults(func=cmd_import)
+
+    r = sub.add_parser("import-rules", help="convert an official rules PDF to KB rule records")
+    r.add_argument("pdf")
+    r.add_argument("--kind", choices=["lrr", "rulebook"], default="lrr")
+    r.add_argument("--ruleset", choices=["base", "pok", "codex", "thunders_edge"], help="ruleset tag for the chunks")
+    r.add_argument("--pages", help='pages to read, 1-based, e.g. "4,6-13,16"')
+    r.add_argument("--out", default="data/private/kb/lrr.jsonl")
+    r.set_defaults(func=cmd_import_rules)
     return p
 
 

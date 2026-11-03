@@ -334,16 +334,32 @@ def validate_action(
 
 
 def kb_ref_resolver(kb, ruleset=None, overrides: dict[str, list[str]] | None = None) -> RefResolver:
-    """Resolve engine topics to rule ids: explicit overrides first, else best rule match."""
+    """Resolve engine topics to rule ids.
+
+    Pinned ids (``overrides``, e.g. data/lrr_refs.json) win when the knowledge
+    base holds them; otherwise the best-matching rule chunks are used.
+    """
     overrides = overrides or {}
     cache: dict[str, list[str]] = {}
 
     def resolve(topic: str) -> list[str]:
-        if topic in overrides:
-            return list(overrides[topic])
+        pinned = [r for r in overrides.get(topic, []) if r in kb]
+        if pinned:
+            return pinned
         if topic not in cache:
             hits = kb.rules_lookup(TOPICS.get(topic, topic), ruleset=ruleset, k=2)["results"]
             cache[topic] = [h["id"] for h in hits if h.get("kind") == "rule"][:2]
         return cache[topic]
 
     return resolve
+
+
+def load_ref_overrides(path) -> dict[str, list[str]]:
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.exists():
+        return {}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return {k: list(v) for k, v in data.items() if not k.startswith("_")}
