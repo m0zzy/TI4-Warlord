@@ -11,10 +11,10 @@ The design is in [`docs/design.md`](docs/design.md). Three principles drive it:
 
 | # | Step | State |
 |---|------|-------|
-| 1 | State schema + perspective projection | Done: `warlord.state`. The AsyncTI4 *game snapshot* importer is not written yet (waiting on the maintainers' permission, see open questions). |
-| 2 | Knowledge base + `rules_lookup` / `card_lookup` | Done: `warlord.kb`, with an AsyncTI4 *component data* importer. It covers action cards, agendas, techs, units, leaders, promissory notes, relics, breakthroughs, strategy cards, decks and strategy card sets. Objectives, explores, factions and tiles are still to come. The repo ships only sample records; you load the real LRR yourself. |
+| 1 | State schema + perspective projection | Done: `warlord.state`. Games import from AsyncTI4's public API: live games as public views, completed games (capped at 50) with full hidden information. |
+| 2 | Knowledge base + `rules_lookup` / `card_lookup` | Done: `warlord.kb`. It has an AsyncTI4 component importer covering every card type, factions, tiles and planets (1,221 records on the real data), and a rules PDF importer for LRR 2.0 and the Thunder's Edge rulebook. The repo ships only sample records; you run the importers yourself. |
 | 3 | Referee v0 (text-only, cited) | Done: `warlord.agent.Referee`. Code enforces the citation and verification rules. |
-| 4 | Engine `validate_action` | Partial. It checks turn order, passing, tactic tokens, activation, moving out of activated systems, units present, held strategy cards, cards in hand and open windows. It does not check movement range, capacity, fleet supply, invasion or production yet, and reports those as `unchecked`. |
+| 4 | Engine `validate_action` | Partial. It checks turn order, passing, tactic tokens, activation, moving out of activated systems, units present, held strategy cards, cards in hand and open windows, citing LRR numbers. Map geometry and adjacency (wormholes, hyperlanes) are in `engine/geometry.py` but not yet used for movement range. Capacity, fleet supply, invasion and production are reported as `unchecked`. |
 | 5 | `combat_sim` | Done for space combat: space cannon offense, AFB, Sustain Damage and combat rounds. |
 | 6 | Advisor (`legal_actions`, `apply_action`, `evaluate_position`) | Tool definitions only; the handlers return `not_implemented`. |
 | 7–8 | Annotation rounds, further content | Dataset schemas and the by-game split are in place. Thunder's Edge is in v1 scope: rulesets name the decks a game uses, so lookups return the right printing. |

@@ -39,4 +39,4 @@ class GameStore:
     def list_games(self) -> list[str]:
         if not self.root.exists():
             return []
-        return sorted(p.stem for p in self.root.glob("*.json"))
+        return sorted(p.stem for p in self.root.glob("*.json") if not p.name.startswith(("_", ".")))

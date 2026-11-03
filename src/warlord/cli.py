@@ -105,6 +105,39 @@ def cmd_import_rules(args) -> int:
     return 0
 
 
+def cmd_fetch(args) -> int:
+    from warlord.state.importers.fetch import fetch_completed, fetch_live
+
+    kb = _kb(args.kb)
+    store = GameStore(args.games)
+    if args.source == "live":
+        if not args.name:
+            print("give the game name, e.g. pbd12345", file=sys.stderr)
+            return 2
+        result = fetch_live(args.name, kb)
+        store.save(result.state)
+        results = [result]
+    else:
+        results = fetch_completed(args.count, store, kb)
+    print(json.dumps([
+        {"game": r.state.meta.game_id, "players": sorted(r.state.players), "unmapped": r.unmapped, "notes": r.notes}
+        for r in results
+    ], indent=2))
+    return 0
+
+
+def cmd_set_hand(args) -> int:
+    from warlord.state.importers.asyncti4 import set_hand
+
+    store = GameStore(args.games)
+    state = store.load(args.game)
+    split = lambda v: [x for x in (v or "").split(",") if x]  # noqa: E731
+    set_hand(state, args.viewer, split(args.action_cards), split(args.promissory_notes), split(args.secret_objectives))
+    store.save(state)
+    print(f"Saved {args.viewer}'s hand in {args.game}.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="warlord", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -152,6 +185,21 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--out", default="data/private/kb/components.asyncti4.jsonl")
     i.add_argument("--include", nargs="+", default=["base", "pok", "codex", "thunders_edge"])
     i.set_defaults(func=cmd_import)
+
+    f = sub.add_parser("fetch-asyncti4", help="import games from AsyncTI4's public API")
+    f.add_argument("source", choices=["live", "completed"])
+    f.add_argument("name", nargs="?", help="game name, for live")
+    f.add_argument("--count", type=int, default=10, help="completed games to import (50 in total at most)")
+    f.add_argument("--games", default="data/private/games")
+    f.add_argument("--kb", action="append")
+    f.set_defaults(func=cmd_fetch)
+
+    h = sub.add_parser("set-hand", help="enter your own hidden cards for a public-data game")
+    game_args(h, required=True)
+    h.add_argument("--action-cards", help="comma-separated ids, e.g. ac.sabotage,ac.direct_hit")
+    h.add_argument("--promissory-notes")
+    h.add_argument("--secret-objectives")
+    h.set_defaults(func=cmd_set_hand)
 
     r = sub.add_parser("import-rules", help="convert an official rules PDF to KB rule records")
     r.add_argument("pdf")
