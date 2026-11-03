@@ -19,6 +19,10 @@ The design is in [`docs/design.md`](docs/design.md). Three principles drive it:
 | 6 | Advisor (`legal_actions`, `apply_action`, `evaluate_position`) | Tool definitions only; the handlers return `not_implemented`. |
 | 7–8 | Annotation rounds, further content | Dataset schemas and the by-game split are in place. Thunder's Edge is in v1 scope: rulesets name the decks a game uses, so lookups return the right printing. |
 
+## Delivery
+
+The plan is to ship as an **MCP server**, so each player's own agent (Claude Desktop, Claude Code, …) does the reasoning and calls these tools. An API-key mode that runs the model ourselves may come later. See [`docs/mcp-plan.md`](docs/mcp-plan.md). The built-in `warlord ask` referee below is that later mode's starting point, and is how automated evals will run.
+
 ## Layout
 
 ```
