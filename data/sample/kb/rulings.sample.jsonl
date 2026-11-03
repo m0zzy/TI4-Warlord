@@ -1,0 +1,4 @@
+// Sample rulings, invented for tests. Real rulings carry their source and date.
+{"kind":"ruling","id":"ruling.sample.0001","ruleset":"base","question":"Can I move ships out of a system I activated earlier this round to reinforce another system?","answer":"No. A system with your command token in it is locked for movement out for the rest of the round, whichever action placed the token.","refs":["lrr.sample.movement","lrr.sample.command_tokens"],"authority":"official_faq","date":"2020-01-01"}
+{"kind":"ruling","id":"ruling.sample.0002","ruleset":"base","question":"Can Sabotage cancel Sabotage?","answer":"No; the card's own text excludes Sabotage.","refs":["ac.sabotage"],"authority":"card_text","date":"2020-01-01"}
+{"kind":"errata","id":"errata.sample.0001","target":"tech.gravity_drive","date":"2021-01-01","field":"text","old":"one ship gets","new":"1 ship gets","source":"sample"}

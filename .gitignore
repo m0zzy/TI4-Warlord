@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+# Licensed or third-party text (LRR, card text, AsyncTI4 exports) stays out of git.
+data/private/
+data/raw/

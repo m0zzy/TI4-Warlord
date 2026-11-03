@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1",
+  "ruleset": {"base": true, "pok": true, "codex": false, "thunders_edge": false, "lrr": "pok"},
+  "meta": {"game_id": "pbd00000", "source": "manual", "players": 3, "vp_target": 10},
+  "turn": {
+    "round": 3,
+    "phase": "action",
+    "step": null,
+    "active_player": "p3",
+    "speaker": "p1",
+    "open_window": null,
+    "resolving": [],
+    "used_this_turn": [],
+    "used_this_round": ["p1:leader.agent"]
+  },
+  "map": [
+    {"position": "000", "tile": "18", "planets": {"mecatol_rex": {"controller": null}}},
+    {"position": "101", "tile": "26", "command_tokens": ["p3"],
+     "space": {"p3": {"cruiser": 1}},
+     "planets": {"lodor": {"controller": "p3", "units": {"p3": {"infantry": 1}}}}},
+    {"position": "102", "tile": "19",
+     "space": {"p3": {"carrier": 1, "fighter": 2, "dreadnought": 1}},
+     "planets": {"wellon": {"controller": "p3", "units": {"p3": {"infantry": 2}}}}},
+    {"position": "201", "tile": "25", "wormholes": ["beta"],
+     "space": {"p2": {"destroyer": 1, "fighter": 1}},
+     "planets": {"quann": {"controller": "p2", "units": {"p2": {"infantry": 1, "pds": 1}}}}}
+  ],
+  "players": {
+    "p1": {"faction": "sol", "vp": 3,
+           "strategy_cards": [{"id": "leadership", "primary_used": true}], "passed": true,
+           "private": {"action_cards": ["ac.direct_hit"], "promissory_notes": ["pn.sol.ceasefire"], "secret_objectives": ["so.become_a_martyr"]},
+           "scored": [{"id": "obj.expand_borders"}]},
+    "p2": {"faction": "jolnar", "vp": 4,
+           "strategy_cards": [{"id": "technology", "primary_used": false}],
+           "private": {"action_cards": ["ac.sabotage", "ac.direct_hit"], "promissory_notes": ["pn.jolnar.research_agreement"], "secret_objectives": ["so.monument_to_the_ages"]},
+           "scored": [{"id": "obj.expand_borders"}, {"id": "so.destroy_their_greatest_ship", "secret": true, "revealed": false}]},
+    "p3": {"faction": "hacan", "vp": 4,
+           "command_tokens": {"tactic": 2, "fleet": 3, "strategy": 2},
+           "trade_goods": 5, "commodities": {"current": 0, "max": 6},
+           "techs": [{"id": "gravity_drive"}], "unit_upgrades": ["carrier_2"],
+           "strategy_cards": [{"id": "trade", "primary_used": false}],
+           "private": {"action_cards": ["ac.sabotage"], "promissory_notes": ["pn.hacan.trade_agreement"], "secret_objectives": ["so.control_the_region"]},
+           "scored": [{"id": "obj.expand_borders"}]}
+  },
+  "objectives": {"public_revealed": ["obj.expand_borders", "obj.erect_a_monument"], "public_unrevealed": ["obj.develop_weaponry", "obj.lead_from_the_front"]},
+  "laws": [],
+  "discards": {"action_cards": [], "agendas": []},
+  "agenda_deck": ["agenda.mutiny"],
+  "log": [
+    {"seq": 1, "round": 3, "actor": "p1", "kind": "pass"},
+    {"seq": 2, "round": 3, "actor": "p2", "kind": "draw_action_card", "data": {"card": "ac.direct_hit"}, "visible_to": ["p2"]}
+  ]
+}
