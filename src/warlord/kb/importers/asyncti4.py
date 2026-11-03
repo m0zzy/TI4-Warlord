@@ -1,13 +1,15 @@
 """Import AsyncTI4 bot component data into ComponentCard records.
 
 Reads the JSON files under ``src/main/resources/data`` of a local checkout of
-the AsyncTI4 ``TI4_map_generator_bot`` repository (action_cards, agendas,
-technologies, units, ...). Nothing is downloaded here: point the importer at a
-checkout, and keep the output under ``data/private/`` because the card text is
-Fantasy Flight Games' copyright.
+the AsyncTI4 ``TI4_map_generator_bot`` repository: action cards, agendas,
+technologies, units, leaders, promissory notes, relics, breakthroughs and
+strategy cards, plus the deck and strategy card set definitions that say which
+printing of each card a game mode uses. Nothing is downloaded here: point the
+importer at a checkout, and keep the output under ``data/private/`` because
+the card text is Fantasy Flight Games' copyright.
 
-Only sources listed in ``include`` are kept; everything else (homebrew,
-Discordant Stars, Codex until it is in scope) is skipped and counted.
+Only sources listed in ``include`` are kept. Everything else (homebrew,
+Discordant Stars, Twilight's Fall) is skipped and counted.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
-from warlord.kb.records import ComponentCard, Timing
+from warlord.kb.records import ComponentCard, Deck, Timing
 
 # AsyncTI4 "source" value -> our ruleset tag.
 SOURCE_MAP = {
@@ -33,7 +35,15 @@ SOURCE_MAP = {
     "te": "thunders_edge",
 }
 
-DEFAULT_INCLUDE = frozenset({"base", "pok"})
+DEFAULT_INCLUDE = frozenset({"base", "pok", "codex", "thunders_edge"})
+
+# AsyncTI4 deck "type" -> ComponentCard.type, for the card types we import.
+DECK_TYPES = {
+    "action_card": "action_card",
+    "technology": "technology",
+    "relic": "relic",
+    "agenda": "agenda",
+}
 
 
 def slug(text: str) -> str:
@@ -55,7 +65,7 @@ def parse_window(window: str | None, phase: str | None = None) -> Timing | None:
     if not window:
         return None
     w = window.strip()
-    lower = w.lower()
+    lower = w.lower().rstrip(":").strip()
     phase_norm = phase.strip().lower() if phase else None
     if lower == "action":
         return Timing(window="action", trigger=None, phase=phase_norm or "action")
@@ -69,6 +79,7 @@ def parse_window(window: str | None, phase: str | None = None) -> Timing | None:
 @dataclass
 class ImportReport:
     records: list[ComponentCard] = field(default_factory=list)
+    decks: list[Deck] = field(default_factory=list)
     skipped_sources: Counter = field(default_factory=Counter)
     merged_copies: int = 0
     files: list[str] = field(default_factory=list)
@@ -78,6 +89,8 @@ class ImportReport:
         return {
             "records": len(self.records),
             "by_type": dict(by_type),
+            "decks": {d.id: len(d.cards) for d in self.decks},
+            "unresolved_deck_cards": sum(len(d.unresolved) for d in self.decks),
             "merged_copies": self.merged_copies,
             "skipped_sources": dict(self.skipped_sources),
             "files": self.files,
@@ -89,6 +102,7 @@ class _Builder:
         self.include = include
         self.report = ImportReport()
         self._by_id: dict[str, ComponentCard] = {}
+        self._raw_decks: list[tuple[dict, str, str]] = []  # (row, tag, our card type)
 
     def tag(self, source: str | None) -> str | None:
         tag = SOURCE_MAP.get((source or "").lower())
@@ -116,8 +130,38 @@ class _Builder:
             n += 1
         self._by_id[alt_id] = card.model_copy(update={"id": alt_id})
 
+    def add_deck(self, row: dict, tag: str, card_type: str) -> None:
+        self._raw_decks.append((row, tag, card_type))
+
     def finish(self) -> ImportReport:
         self.report.records = list(self._by_id.values())
+        # Resolve deck entries (AsyncTI4 aliases) to our ids, per card type.
+        by_alias: dict[tuple[str, str], str] = {}
+        for card in self.report.records:
+            ref = card.source_ref or ""
+            alias = ref.rsplit(":", 1)[-1] if ref.startswith("asyncti4:") else None
+            for a in {alias, *card.aliases} - {None}:
+                by_alias.setdefault((card.type, a), card.id)
+        for row, tag, card_type in self._raw_decks:
+            ids, missing = [], []
+            for a in row.get("cardIDs") or row.get("scIDs") or []:
+                cid = by_alias.get((card_type, a))
+                if cid is None:
+                    missing.append(a)
+                elif cid not in ids:
+                    ids.append(cid)
+            prefix = "deck.sc_set." if card_type == "strategy_card" else "deck."
+            self.report.decks.append(
+                Deck(
+                    id=f"{prefix}{row['alias']}",
+                    ruleset=tag,  # type: ignore[arg-type]
+                    name=row.get("name", row["alias"]),
+                    card_type=card_type,
+                    cards=ids,
+                    unresolved=missing,
+                    source_ref=f"asyncti4:deck:{row['alias']}",
+                )
+            )
         return self.report
 
 
@@ -227,11 +271,90 @@ def _unit(row: dict, tag: str) -> ComponentCard:
     )
 
 
+def _leader(row: dict, tag: str) -> ComponentCard:
+    return ComponentCard(
+        id=f"leader.{slug(row['id'])}",
+        type="leader",
+        ruleset=tag,  # type: ignore[arg-type]
+        name=row["name"],
+        aliases=[a for a in (row.get("id"), row.get("title")) if a],
+        timing=parse_window(row.get("abilityWindow")),
+        text=row.get("abilityText", ""),
+        faction=row.get("faction"),
+        stats={
+            k: v
+            for k, v in {"leader_type": row.get("type"), "unlock": row.get("unlockCondition")}.items()
+            if v
+        },
+        source_ref=f"asyncti4:leader:{row['id']}",
+    )
+
+
+def _promissory_note(row: dict, tag: str) -> ComponentCard:
+    return ComponentCard(
+        id=f"pn.{slug(row['alias'])}",
+        type="promissory_note",
+        ruleset=tag,  # type: ignore[arg-type]
+        name=row["name"],
+        aliases=[a for a in (row.get("alias"), row.get("shortName")) if a],
+        text=row.get("text", ""),
+        faction=row.get("faction"),
+        stats={k: row[k] for k in ("playArea", "attachment", "playImmediately") if k in row},
+        source_ref=f"asyncti4:promissory_note:{row['alias']}",
+    )
+
+
+def _relic(row: dict, tag: str) -> ComponentCard:
+    return ComponentCard(
+        id=f"relic.{slug(row['name'])}",
+        type="relic",
+        ruleset=tag,  # type: ignore[arg-type]
+        name=row["name"],
+        aliases=[a for a in (row.get("alias"), row.get("shortName")) if a],
+        text=row.get("text", ""),
+        source_ref=f"asyncti4:relic:{row['alias']}",
+    )
+
+
+def _breakthrough(row: dict, tag: str) -> ComponentCard:
+    return ComponentCard(
+        id=f"breakthrough.{slug(row['name'])}",
+        type="breakthrough",
+        ruleset=tag,  # type: ignore[arg-type]
+        name=row["name"],
+        aliases=[a for a in (row.get("alias"),) if a],
+        text=row.get("text", ""),
+        faction=row.get("faction"),
+        stats={"synergy": row["synergy"]} if row.get("synergy") else {},
+        source_ref=f"asyncti4:breakthrough:{row['alias']}",
+    )
+
+
+def _strategy_card(row: dict, tag: str) -> ComponentCard:
+    primary = "\n".join(row.get("primaryTexts") or [])
+    secondary = "\n".join(row.get("secondaryTexts") or [])
+    return ComponentCard(
+        id=f"sc.{slug(row['id'])}",
+        type="strategy_card",
+        ruleset=tag,  # type: ignore[arg-type]
+        name=row["name"],
+        aliases=[row["id"]],
+        text=f"Primary:\n{primary}\nSecondary:\n{secondary}".strip(),
+        stats={"initiative": row["initiative"]} if "initiative" in row else {},
+        source_ref=f"asyncti4:strategy_card:{row['id']}",
+    )
+
+
 CONVERTERS: dict[str, Callable[[dict, str], ComponentCard]] = {
     "action_cards": _action_card,
     "agendas": _agenda,
     "technologies": _technology,
     "units": _unit,
+    "leaders": _leader,
+    "promissory_notes": _promissory_note,
+    "relics": _relic,
+    "breakthroughs": _breakthrough,
+    "strategy_cards": _strategy_card,
 }
 
 
@@ -257,23 +380,33 @@ def _feed(b: _Builder, kind: str, rows: Iterable[dict]) -> None:
 def import_checkout(
     data_dir: str | Path, include: Iterable[str] = DEFAULT_INCLUDE
 ) -> ImportReport:
-    """Import every supported component folder under an AsyncTI4 ``data`` directory."""
+    """Import every supported component folder, plus decks, under an AsyncTI4 ``data`` directory."""
     root = Path(data_dir)
     b = _Builder(frozenset(include))
-    for kind in CONVERTERS:
-        folder = root / kind
-        if not folder.is_dir():
-            continue
-        for f in sorted(folder.glob("*.json")):
+
+    def rows_in(folder: str):
+        for f in sorted((root / folder).glob("*.json")) if (root / folder).is_dir() else []:
             rows = json.loads(f.read_text(encoding="utf-8"))
-            if not isinstance(rows, list):
-                continue
-            b.report.files.append(str(f.relative_to(root)))
-            _feed(b, kind, rows)
+            if isinstance(rows, list):
+                b.report.files.append(str(f.relative_to(root)))
+                yield from rows
+
+    for kind in CONVERTERS:
+        _feed(b, kind, rows_in(kind))
+
+    for row in rows_in("decks"):
+        card_type = DECK_TYPES.get(row.get("type", ""))
+        tag = SOURCE_MAP.get((row.get("source") or "").lower())
+        if card_type and tag in b.include:
+            b.add_deck(row, tag, card_type)
+    for row in rows_in("strategy_card_sets"):
+        tag = SOURCE_MAP.get((row.get("source") or "").lower())
+        if tag in b.include:
+            b.add_deck(row, tag, "strategy_card")
     return b.finish()
 
 
-def write_jsonl(records: Iterable[ComponentCard], path: str | Path) -> Path:
+def write_jsonl(records: Iterable[ComponentCard | Deck], path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:

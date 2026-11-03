@@ -6,7 +6,7 @@ Nov 2, 2026 · @N
 
 One agent plays two roles: **referee** (is this legal, and what happens) and **advisor** (what should I do, and why). A rules engine decides legality, retrieval over the rules and card text supplies citations, and the model interprets the state, picks among legal options and explains them.
 
-**Scope for v1:** base game + Prophecy of Kings, using the Prophecy of Kings Living Rules Reference (LRR) and current errata. Thunder's Edge and the Codex content come later. Every rule, card, state and example carries a `ruleset` tag so content from different releases never mixes.
+**Scope for v1:** base game + Prophecy of Kings + Thunder's Edge, using the matching Living Rules Reference (LRR) and current errata. Codex content is included wherever a game's decks use it, which AsyncTI4's default PoK and Thunder's Edge decks do. Twilight's Fall and homebrew are out of scope. Every rule, card, state and example carries a `ruleset` tag, and each game names the decks it draws from, so content from different releases never mixes.
 
 **Design principles**
 
@@ -255,9 +255,9 @@ Decision types to cover: tactical action, strategy card pick, production, agenda
 
 **Mining AsyncTI4 replays**
 
-1. Get permission from the AsyncTI4 maintainers before bulk use, and strip player names.
-2. Filter to standard base + PoK games; drop games with homebrew content or unusual settings.
-3. Cut a snapshot before each decision and label the decision type from the bot's action log.
+1. Pull completed games from AsyncTI4's public export (`/api/public/games/events`), at most 50 games in total. Strip Discord ids, usernames and teammate ids.
+2. The export already filters to competitive games: Thunder's Edge + PoK, 3–8 players, a winner, at least three rounds, and no homebrew, Fog of War, Galactic Events or scenarios.
+3. Each game ships with its final save file, which holds full hidden information, and a coarse event log. Label decision types from the events: strategy card picks, research, scoring, card plays and transactions. Snapshots before tactical actions need the events replayed through `apply_action`, and the logs may not cover every round.
 4. Attach outcomes (VP gained that round, game winner) as weak labels only. A move by the eventual winner is not automatically a good move.
 5. Send a sample to expert annotators for rationale and alternatives. The replay supplies the state; the expert supplies the why.
 
@@ -291,13 +291,16 @@ Ship a text-only referee first: it is useful on day one and produces the citatio
 5. **`combat_sim`.**
 6. **Advisor v0:** `legal_actions`, `apply_action`, `evaluate_position`; few-shot from a first 100 records of set D.
 7. **Expert annotation rounds** to grow sets D and E; consider fine-tuning once they're large enough to beat few-shot.
-8. **Expand** to Thunder's Edge and the Codex content.
+8. **Expand** to further content (such as Twilight's Fall) only if wanted.
 
 **Decisions** (Nov 3, 2026)
 
-- [x] **AsyncTI4 snapshots:** allowed, but not in bulk. The replay importer is capped at 50 games and strips player names. That covers the first 100 records of set D; the 500-record target may need other sources.
+- [x] **AsyncTI4 data:** only public data is used. That means the public API (`/api/public/**`, no login) and the bot's open-source component data.
+  - The live game view (`/game/{name}/web-data`) shows public information only: hands are counts. It is the source for `get_state` on live games. A player's own hidden cards are not available publicly, so they enter them themselves.
+  - The completed-game export carries full saves and events, and is capped at 50 games for the datasets. That covers the first 100 records of set D; the 500-record target may need other sources.
+- [x] **Thunder's Edge:** in scope for v1 (decided Nov 3, 2026), because the public export contains only Thunder's Edge + PoK games. Rulesets carry deck ids (for example `deck.action_cards_te`) so lookups return the printing a game actually uses.
 - [x] **Engine:** grow the new Python engine in this repo (`warlord.engine`). Next coverage, in order: movement range and adjacency (needs tile and planet data from AsyncTI4), transport capacity, fleet supply, then invasion and production.
 - [x] **Deals between players:** the advisor records stated deals as context and mentions them, but never relies on them. Every plan assumes the other player may break the deal.
 - [x] **Licence:** a shared free tool. LRR and card text stay in a private knowledge base. Answers paraphrase and cite rather than reproduce the text: no verbatim quote longer than 20 words, enforced in code.
 - [x] **Annotators:** one annotator (the project owner) for sets D and E, so no disagreement process. Odds-based labels are cross-checked against `combat_sim`.
-- [x] **LRR source:** parse the official PoK LRR PDF into one chunk per numbered rule; output goes under `data/private/`.
+- [x] **LRR source:** parse the official LRR PDF into one chunk per numbered rule, tagging each chunk with its release; output goes under `data/private/`. Thunder's Edge games need the edition that covers Thunder's Edge.

@@ -19,6 +19,7 @@ from typing import Any, Callable
 from warlord.engine.combat import combat_sim
 from warlord.engine.validate import RefResolver, kb_ref_resolver, validate_action
 from warlord.kb.store import KnowledgeBase
+from warlord.ruleset import Ruleset
 from warlord.state.schema import PerspectiveView
 from warlord.state.store import GameNotFound, GameStore
 
@@ -33,6 +34,7 @@ class ToolContext:
     store: GameStore | None = None
     game_id: str | None = None
     viewer: str | None = None
+    default_ruleset: Ruleset | None = None  # used when no game is attached
     ref_overrides: dict[str, list[str]] = field(default_factory=dict)
 
     # Session record.
@@ -51,9 +53,9 @@ class ToolContext:
                 raise ToolError(f"Game {self.game_id!r} not found.") from e
         return self._view
 
-    def ruleset(self):
+    def ruleset(self) -> Ruleset | None:
         v = self.view()
-        return v.ruleset if v else None
+        return v.ruleset if v else self.default_ruleset
 
     def resolver(self) -> RefResolver:
         if self._resolver is None:

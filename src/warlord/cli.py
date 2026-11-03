@@ -27,7 +27,15 @@ def _kb(paths: list[str] | None) -> KnowledgeBase:
 
 def _ctx(args) -> ToolContext:
     store = GameStore(args.games) if args.game else None
-    return ToolContext(kb=_kb(args.kb), store=store, game_id=args.game, viewer=args.viewer)
+    from warlord.ruleset import V1_RULESETS
+
+    return ToolContext(
+        kb=_kb(args.kb),
+        store=store,
+        game_id=args.game,
+        viewer=args.viewer,
+        default_ruleset=V1_RULESETS[args.ruleset],
+    )
 
 
 def cmd_ask(args) -> int:
@@ -67,7 +75,7 @@ def cmd_import(args) -> int:
     from warlord.kb.importers.asyncti4 import import_checkout, write_jsonl
 
     report = import_checkout(args.data_dir, include=args.include)
-    path = write_jsonl(report.records, args.out)
+    path = write_jsonl([*report.records, *report.decks], args.out)
     print(json.dumps({**report.summary(), "written": str(path)}, indent=2))
     return 0
 
@@ -81,6 +89,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--viewer", required=required, help="asking player's seat, e.g. p3")
         sp.add_argument("--games", default=_default("data/private/games", "data/sample/games"))
         sp.add_argument("--kb", action="append", help="knowledge base dir or .jsonl (repeatable)")
+        sp.add_argument("--ruleset", default="thunders_edge", choices=["pok", "thunders_edge"],
+                        help="content to assume when no game is attached")
 
     a = sub.add_parser("ask", help="ask the referee a question")
     a.add_argument("question")
@@ -115,7 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
     i = sub.add_parser("import-asyncti4", help="convert AsyncTI4 component JSON to KB records")
     i.add_argument("data_dir", help="path to TI4_map_generator_bot/src/main/resources/data")
     i.add_argument("--out", default="data/private/kb/components.asyncti4.jsonl")
-    i.add_argument("--include", nargs="+", default=["base", "pok"])
+    i.add_argument("--include", nargs="+", default=["base", "pok", "codex", "thunders_edge"])
     i.set_defaults(func=cmd_import)
     return p
 

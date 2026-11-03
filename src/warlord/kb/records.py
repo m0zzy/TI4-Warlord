@@ -94,6 +94,7 @@ class ComponentCard(_Model):
         "tile",
         "planet",
         "ability",
+        "breakthrough",
     ]
     ruleset: ContentTag
     name: str
@@ -107,6 +108,25 @@ class ComponentCard(_Model):
     engine_ops: dict | None = None
     errata: list[str] = Field(default_factory=list)  # ids of applied patches
     source_ref: str | None = None  # where the record came from (e.g. asyncti4 alias)
+
+
+class Deck(_Model):
+    """Which cards make up one deck (or strategy card set) in a game mode.
+
+    Games in AsyncTI4 draw from named decks, e.g. ``action_cards_te`` for
+    Thunder's Edge + PoK. A ruleset that names a deck for a card type limits
+    lookups of that type to the deck's cards, so the right printing of a card
+    (base, Codex or Thunder's Edge) is the one returned.
+    """
+
+    kind: Literal["deck"] = "deck"
+    id: str  # "deck.<alias>"
+    ruleset: ContentTag
+    name: str
+    card_type: str  # ComponentCard.type it holds
+    cards: list[str] = Field(default_factory=list)  # component ids
+    unresolved: list[str] = Field(default_factory=list)  # source aliases with no imported card
+    source_ref: str | None = None
 
 
 class Ruling(_Model):
