@@ -72,6 +72,7 @@ The model drafts a structured answer (`ruling`, `answer`, `citations`, `verified
 - A citation is kept only if its id appeared in a tool result during this conversation. Anything else is dropped and reported.
 - An answer is **verified** only if `validate_action` ran with `coverage: "engine"` and no step fell back to text-only coverage. Pure rules questions are therefore always unverified in v0, as the design requires.
 - `get_state` refuses any seat other than the asking player, and the engine only ever runs on that seat's perspective view.
+- Answers paraphrase and cite instead of reproducing rule or card text, because this is a shared tool and the text is copyrighted. If an answer copies more than 20 consecutive words from a source record, the referee asks the model to rewrite it once. If the long quote is still there, it is cut and replaced with a pointer to the cited source (`trimmed_quotes` in the result).
 
 Requests use `claude-opus-5-5` with adaptive thinking, a JSON-schema output format, prompt caching (the system prompt and tool list are byte-stable; the game id goes in the user message), and server-side refusal fallback (`fallbacks: "default"`). Pass `fallbacks=False` to `Referee` to turn that off.
 

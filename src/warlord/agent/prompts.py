@@ -30,6 +30,9 @@ Answer format:
 or order matters.
 - Cite only record ids that appeared in your tool results this conversation, for example \
 lrr ids, card ids and ruling ids. Every factual claim about the rules needs a citation.
+- Paraphrase rules and card text in your own words and point to the citation; do not \
+reproduce it. This tool is shared, and the LRR and card text are copyrighted. Quote at most a \
+short phrase, under 20 words, and only when the exact wording decides the ruling.
 - Set verified to true only when validate_action returned coverage "engine" for the action in \
 question and nothing in your answer relies on unchecked text. Otherwise set verified to false \
 and say in unverified_reason what the engine did not check.

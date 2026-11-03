@@ -293,10 +293,11 @@ Ship a text-only referee first: it is useful on day one and produces the citatio
 7. **Expert annotation rounds** to grow sets D and E; consider fine-tuning once they're large enough to beat few-shot.
 8. **Expand** to Thunder's Edge and the Codex content.
 
-**Open questions**
+**Decisions** (Nov 3, 2026)
 
-- [ ] Will the AsyncTI4 maintainers allow bulk use of game snapshots, and on what terms?
-- [ ] Extend the existing Python `ti4-rules-engine`, wrap logic from the Java AsyncTI4 bot, or write a new engine?
-- [ ] How should advice handle deals between players, which are mostly non-binding?
-- [ ] What licence terms apply to using LRR and card text in a shared or commercial product?
-- [ ] Who are the expert annotators, and how is disagreement between them resolved?
+- [x] **AsyncTI4 snapshots:** allowed, but not in bulk. The replay importer is capped at 50 games and strips player names. That covers the first 100 records of set D; the 500-record target may need other sources.
+- [x] **Engine:** grow the new Python engine in this repo (`warlord.engine`). Next coverage, in order: movement range and adjacency (needs tile and planet data from AsyncTI4), transport capacity, fleet supply, then invasion and production.
+- [x] **Deals between players:** the advisor records stated deals as context and mentions them, but never relies on them. Every plan assumes the other player may break the deal.
+- [x] **Licence:** a shared free tool. LRR and card text stay in a private knowledge base. Answers paraphrase and cite rather than reproduce the text: no verbatim quote longer than 20 words, enforced in code.
+- [x] **Annotators:** one annotator (the project owner) for sets D and E, so no disagreement process. Odds-based labels are cross-checked against `combat_sim`.
+- [x] **LRR source:** parse the official PoK LRR PDF into one chunk per numbered rule; output goes under `data/private/`.
