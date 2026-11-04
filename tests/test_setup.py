@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from warlord.setup import SetupError, resolve_asyncti4, run_setup
+from warlord.setup import OFFICIAL_PDFS, SetupError, download_pdf, resolve_asyncti4, run_setup
 
 
 def _asyncti4(tmp_path):
@@ -22,7 +22,7 @@ def test_resolve_accepts_checkout_or_data_folder(tmp_path):
 
 
 def test_setup_writes_and_flags_what_is_missing(tmp_path):
-    report = run_setup(tmp_path / "data", asyncti4=_asyncti4(tmp_path))
+    report = run_setup(tmp_path / "data", asyncti4=_asyncti4(tmp_path), download=False)
     assert report.written == {"components": 1, "decks": 0}
     assert (tmp_path / "data" / "kb" / "components.asyncti4.jsonl").exists()
     assert (tmp_path / "data" / "games").is_dir()
@@ -32,11 +32,34 @@ def test_setup_writes_and_flags_what_is_missing(tmp_path):
 
 
 def test_setup_with_nothing(tmp_path):
-    report = run_setup(tmp_path / "data")
+    report = run_setup(tmp_path / "data", download=False)
     assert [c["check"] for c in report.checks] == ["knowledge_base"] and not report.ok
 
 
 def test_missing_pdf(tmp_path):
     pytest.importorskip("pdfminer")
     with pytest.raises(SetupError):
-        run_setup(tmp_path / "data", lrr=tmp_path / "missing.pdf")
+        run_setup(tmp_path / "data", lrr=tmp_path / "missing.pdf", download=False)
+
+
+def test_download_pdf_fetches_once_and_checks_it_is_a_pdf(tmp_path):
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return b"%PDF-1.6 fake"
+
+    path = download_pdf("lrr", tmp_path, fetch)
+    assert path.read_bytes().startswith(b"%PDF-") and calls == [OFFICIAL_PDFS["lrr"]]
+    assert download_pdf("lrr", tmp_path, fetch) == path and len(calls) == 1  # reused
+
+
+def test_download_pdf_explains_failures(tmp_path):
+    with pytest.raises(SetupError, match="--te-rulebook PATH"):
+        download_pdf("te_rulebook", tmp_path, lambda url: b"<html>moved</html>")
+
+    def offline(url):
+        raise OSError("network unreachable")
+
+    with pytest.raises(SetupError, match="Could not download the Living Rules Reference"):
+        download_pdf("lrr", tmp_path / "x", offline)

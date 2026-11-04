@@ -66,14 +66,16 @@ pip install 'ti4-warlord[pdf]'
 ```
 
 ```bash
-warlord setup --lrr path/to/ti10_pok_living_rules_reference_20_web.pdf --te-rulebook path/to/te_rulebook_web.pdf --download-asyncti4
+warlord setup
 ```
+
+Setup downloads the official PDFs from FFG and the AsyncTI4 card data itself. Paths can be passed instead (see the README).
 
 ```bash
 claude mcp add warlord -- warlord mcp
 ```
 
-Claude Desktop users add the same command in its MCP server settings. `warlord setup` runs the existing importers into the data folder and checks the results (101 LRR topics, card counts, deck resolution).
+Claude Desktop users add the same command in its MCP server settings. `warlord setup` runs the existing importers into the data folder and checks the results (101 LRR topics, card counts, deck resolution). Distribution limits are tracked in [public-release.md](public-release.md).
 
 ## Evals without an API key
 

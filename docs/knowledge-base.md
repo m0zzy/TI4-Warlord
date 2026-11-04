@@ -35,7 +35,7 @@ Newer printings supersede older ones: a Thunder's Edge leader over its PoK versi
 
 ## Rules PDFs
 
-The current official rules are the **Living Rules Reference 2.0** (Prophecy of Kings) plus the **Thunder's Edge rulebook**. As of Nov 2026 no newer LRR has been published, and the TE rulebook points back to the LRR. Both PDFs are on Fantasy Flight Games' site. The importer needs the `pdf` extra:
+The current official rules are the **Living Rules Reference 2.0** (Prophecy of Kings) plus the **Thunder's Edge rulebook**. As of Nov 2026 no newer LRR has been published, and the TE rulebook points back to the LRR. Both PDFs are on Fantasy Flight Games' site, and `warlord setup` downloads and imports them for you. To run the importer by hand, install the `pdf` extra:
 
 ```bash
 pip install -e '.[pdf]'

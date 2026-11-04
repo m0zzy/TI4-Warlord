@@ -1,12 +1,19 @@
 """``warlord setup``: build a player's knowledge base from their own files.
 
-The player brings:
+By default setup fetches everything itself, straight from the official
+sources onto the player's machine:
 
-* the Living Rules Reference PDF (``--lrr``),
-* the Thunder's Edge rulebook PDF (``--te-rulebook``, optional),
-* AsyncTI4 component data (``--asyncti4``): a checkout of the bot repository,
-  or its ``src/main/resources/data`` folder. ``--download-asyncti4`` fetches
-  only the folders needed, with a sparse git clone.
+* the Living Rules Reference and the Thunder's Edge rulebook PDFs, from
+  Fantasy Flight Games' own links;
+* AsyncTI4's component data, with a sparse git clone of only the folders
+  needed.
+
+The player can instead point at files they already have (``--lrr``,
+``--te-rulebook``, ``--asyncti4``), or turn downloading off (``--no-download``).
+
+Warlord itself never ships the rules or card text: it is Fantasy Flight
+Games' copyright, so each player's copy comes from FFG to them. See
+docs/public-release.md before distributing Warlord publicly.
 
 Setup runs the importers into ``<data>/kb`` and then checks the result, so a
 wrong or partial file shows up now instead of as bad rulings later.
@@ -24,6 +31,14 @@ from warlord.engine.validate import load_ref_overrides
 from warlord.kb.importers.asyncti4 import import_checkout, write_jsonl
 from warlord.kb.store import KnowledgeBase
 from warlord.paths import LRR_REFS, games_dir, kb_dir
+
+# Official download links (Fantasy Flight Games' CDN). If FFG moves a file,
+# setup says so and asks for the file by path.
+OFFICIAL_PDFS = {
+    "lrr": "https://images-cdn.fantasyflightgames.com/filer_public/51/55/51552c7f-c05c-445b-84bf-4b073456d008/ti10_pok_living_rules_reference_20_web.pdf",
+    "te_rulebook": "https://images-cdn.fantasyflightgames.com/filer_public/ca/e7/cae7706f-cdb5-4ee1-a20c-7f76a13d135c/te_rulebook_web.pdf",
+}
+USER_AGENT = "ti4-warlord/0.1 (setup; downloads the player's own copy)"
 
 ASYNCTI4_REPO = "https://github.com/AsyncTI4/TI4_map_generator_bot"
 ASYNCTI4_FOLDERS = ["src/main/resources/data", "src/main/resources/systems", "src/main/resources/planets"]
@@ -63,6 +78,42 @@ def resolve_asyncti4(path: str | Path) -> Path:
     raise SetupError(f"{p} is not an AsyncTI4 checkout or data folder (no action_cards/ inside).")
 
 
+def _http_get(url: str, timeout: float = 120.0) -> bytes:
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https URLs
+        return resp.read()
+
+
+def download_pdf(which: str, dest_dir: Path, fetch=_http_get) -> Path:
+    """Fetch an official rules PDF once; later runs reuse the saved copy."""
+    url = OFFICIAL_PDFS[which]
+    dest = dest_dir / url.rsplit("/", 1)[-1]
+    if dest.exists() and dest.read_bytes()[:5] == b"%PDF-":
+        return dest
+    try:
+        data = fetch(url)
+    except Exception as e:  # noqa: BLE001 - any network failure means the same thing to the player
+        raise SetupError(
+            f"Could not download the {_LABEL[which]} from {url} ({e}). "
+            f"Download it yourself and pass it with --{which.replace('_', '-')} PATH."
+        ) from e
+    if data[:5] != b"%PDF-":
+        raise SetupError(
+            f"{url} did not return a PDF; FFG may have moved the {_LABEL[which]}. "
+            f"Download it yourself and pass it with --{which.replace('_', '-')} PATH."
+        )
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".part")
+    tmp.write_bytes(data)
+    tmp.replace(dest)
+    return dest
+
+
+_LABEL = {"lrr": "Living Rules Reference", "te_rulebook": "Thunder's Edge rulebook"}
+
+
 def download_asyncti4(dest: Path) -> Path:
     """Sparse, shallow clone of just the component folders (a few MB)."""
     if shutil.which("git") is None:
@@ -82,16 +133,27 @@ def run_setup(
     lrr: str | Path | None = None,
     te_rulebook: str | Path | None = None,
     asyncti4: str | Path | None = None,
-    download: bool = False,
+    download: bool = True,
+    fetch=_http_get,
 ) -> SetupReport:
     kb_path = kb_dir(data)
     kb_path.mkdir(parents=True, exist_ok=True)
     games_dir(data).mkdir(parents=True, exist_ok=True)
     report = SetupReport(data=str(data))
 
+    # Fetch whatever the player did not supply.
+    raw = data / "raw"
+    if download:
+        if lrr is None:
+            lrr = download_pdf("lrr", raw / "rules", fetch)
+            report.written["downloaded_lrr"] = 1
+        if te_rulebook is None:
+            te_rulebook = download_pdf("te_rulebook", raw / "rules", fetch)
+            report.written["downloaded_te_rulebook"] = 1
+        if asyncti4 is None:
+            asyncti4 = download_asyncti4(raw / "asyncti4")
+
     # Components.
-    if asyncti4 is None and download:
-        asyncti4 = download_asyncti4(data / "raw" / "asyncti4")
     if asyncti4 is not None:
         result = import_checkout(resolve_asyncti4(asyncti4))
         write_jsonl([*result.records, *result.decks], kb_path / "components.asyncti4.jsonl")

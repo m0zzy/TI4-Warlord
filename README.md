@@ -47,13 +47,15 @@ data/sample/            sample game + sample KB (paraphrased placeholders, not t
    pip install -e '.[pdf]'
    ```
 
-2. Build your knowledge base from your own copies of the rules. Download the [Living Rules Reference 2.0](https://images-cdn.fantasyflightgames.com/filer_public/51/55/51552c7f-c05c-445b-84bf-4b073456d008/ti10_pok_living_rules_reference_20_web.pdf) and the [Thunder's Edge rulebook](https://images-cdn.fantasyflightgames.com/filer_public/ca/e7/cae7706f-cdb5-4ee1-a20c-7f76a13d135c/te_rulebook_web.pdf) from Fantasy Flight Games, then:
+2. Build your knowledge base:
 
    ```bash
-   warlord setup --lrr ti10_pok_living_rules_reference_20_web.pdf --te-rulebook te_rulebook_web.pdf --download-asyncti4
+   warlord setup
    ```
 
-   `--download-asyncti4` sparse-clones the AsyncTI4 card data with git; pass `--asyncti4 PATH` instead if you already have a checkout. Everything goes to `~/.local/share/warlord` (or `$WARLORD_DATA`, or `--data DIR`). The report ends with checks such as "101 LRR topics" and "every engine rule reference is in the LRR".
+   This downloads the [Living Rules Reference 2.0](https://images-cdn.fantasyflightgames.com/filer_public/51/55/51552c7f-c05c-445b-84bf-4b073456d008/ti10_pok_living_rules_reference_20_web.pdf) and the [Thunder's Edge rulebook](https://images-cdn.fantasyflightgames.com/filer_public/ca/e7/cae7706f-cdb5-4ee1-a20c-7f76a13d135c/te_rulebook_web.pdf) from Fantasy Flight Games, and sparse-clones the AsyncTI4 card data with git (about 15 MB). It then builds and checks the knowledge base, which takes about 15 seconds. Pass `--lrr`, `--te-rulebook` or `--asyncti4` to use files you already have, or `--no-download` to fetch nothing. Everything goes to `~/.local/share/warlord` (or `$WARLORD_DATA`, or `--data DIR`). The report ends with checks such as "101 LRR topics" and "every engine rule reference is in the LRR".
+
+   The rules and card text are Fantasy Flight Games' copyright, so Warlord never ships them: each player's copy comes straight from FFG. See [`docs/public-release.md`](docs/public-release.md) before distributing Warlord publicly.
 
 3. Connect it to your client.
 

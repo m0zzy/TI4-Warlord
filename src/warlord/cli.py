@@ -149,7 +149,7 @@ def cmd_setup(args) -> int:
             lrr=args.lrr,
             te_rulebook=args.te_rulebook,
             asyncti4=args.asyncti4,
-            download=args.download_asyncti4,
+            download=not args.no_download,
         )
     except SetupError as e:
         print(f"setup failed: {e}", file=sys.stderr)
@@ -227,12 +227,17 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--secret-objectives")
     h.set_defaults(func=cmd_set_hand)
 
-    su = sub.add_parser("setup", help="build the knowledge base from your rules PDFs and AsyncTI4 data")
+    su = sub.add_parser(
+        "setup",
+        help="download the rules and card data and build the knowledge base",
+        description="With no options, downloads the official rules PDFs from FFG and the AsyncTI4 card data, "
+        "then builds and checks the knowledge base. Pass paths to use files you already have.",
+    )
     su.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
     su.add_argument("--lrr", help="Living Rules Reference PDF")
     su.add_argument("--te-rulebook", help="Thunder's Edge rulebook PDF")
     su.add_argument("--asyncti4", help="AsyncTI4 bot checkout, or its src/main/resources/data folder")
-    su.add_argument("--download-asyncti4", action="store_true", help="sparse-clone the AsyncTI4 data with git")
+    su.add_argument("--no-download", action="store_true", help="use only the files you pass; download nothing")
     su.set_defaults(func=cmd_setup)
 
     m = sub.add_parser("mcp", help="run the MCP server over stdio")
