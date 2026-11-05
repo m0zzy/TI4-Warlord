@@ -47,11 +47,14 @@ def test_tools_and_prompt_listed(data):
         async with Client(build_server(load_session(data))) as c:
             tools = {t.name for t in (await c.list_tools()).tools}
             prompt = await c.get_prompt("referee", {"question": "Can I pass?"})
-            return tools, prompt.messages[0].content.text
+            advisor = await c.get_prompt("advisor", {})
+            return tools, prompt.messages[0].content.text, advisor.messages[0].content.text
 
-    tools, prompt = asyncio.run(go())
+    tools, prompt, advisor = asyncio.run(go())
     assert {"list_games", "open_game", "fetch_live_game", "set_my_hand", "get_state", "rules_lookup",
-            "card_lookup", "validate_action", "combat_sim"} <= tools
+            "card_lookup", "validate_action", "combat_sim", "check_ruling", "legal_actions", "apply_action",
+            "evaluate_position"} <= tools
+    assert "legal_actions" in advisor and "non-binding" in advisor
     assert "status_line" in prompt and prompt.endswith("The player asks: Can I pass?")
 
 

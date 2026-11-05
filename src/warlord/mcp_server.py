@@ -25,7 +25,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from warlord.agent.prompts import REFEREE_MCP
+from warlord.agent.prompts import ADVISOR_MCP, REFEREE_MCP
 from warlord.engine.validate import load_ref_overrides
 from warlord.kb.store import KnowledgeBase
 from warlord.paths import LRR_REFS, data_dir, games_dir, kb_dir
@@ -40,7 +40,8 @@ INSTRUCTIONS = (
     "Use the 'referee' prompt for how to rule. In short: open a game as the asking player, look up "
     "every rule and card you rely on, validate concrete moves with the engine and repeat its "
     "status_line, use combat_sim for odds, cite the record ids the tools return, and run "
-    "check_ruling on your draft before answering."
+    "check_ruling on your draft before answering. For advice on what to do, use the 'advisor' prompt: "
+    "legal_actions for options, apply_action for what-ifs, evaluate_position for the overall picture."
 )
 
 
@@ -242,6 +243,23 @@ def build_server(session: Session) -> MCPServer:
             {"attacker": attacker, "defender": defender, "trials": trials, "space_cannon": space_cannon, "afb": afb},
         )
 
+    # -------------------------------------------------------------- advisor
+
+    @server.tool(description=TOOL_DEFS["legal_actions"]["description"])
+    def legal_actions(player: str | None = None) -> dict:
+        session.require_game()
+        return session.call("legal_actions", {"player": player} if player else {})
+
+    @server.tool(description=TOOL_DEFS["apply_action"]["description"])
+    def apply_action(action: dict) -> dict:
+        session.require_game()
+        return session.call("apply_action", {"action": action})
+
+    @server.tool(description=TOOL_DEFS["evaluate_position"]["description"])
+    def evaluate_position(player: str | None = None) -> dict:
+        session.require_game()
+        return session.call("evaluate_position", {"player": player} if player else {})
+
     # -------------------------------------------------------------- checks
 
     @server.tool(
@@ -259,6 +277,10 @@ def build_server(session: Session) -> MCPServer:
         return run_check(session.context(), answer, citations, claims_verified, final=final)
 
     # -------------------------------------------------------------- prompts
+
+    @server.prompt(description="How to advise the asking player on their next move with these tools.")
+    def advisor(question: str = "") -> str:
+        return ADVISOR_MCP + (f"\nThe player asks: {question}" if question else "")
 
     @server.prompt(description="How to act as the TI4 rules referee with these tools.")
     def referee(question: str = "") -> str:

@@ -170,6 +170,88 @@ def _combat_sim(ctx: ToolContext, args: dict) -> dict:
     return result
 
 
+def _seat(ctx: ToolContext, args: dict) -> str:
+    view = ctx.view()
+    if view is None:
+        raise ToolError("No game is open.")
+    player = args.get("player") or ctx.viewer
+    if player not in view.players:
+        raise ToolError(f"No seat {player!r}. Seats: {', '.join(sorted(view.players))}.")
+    return player
+
+
+def _legal_actions(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.options import legal_actions
+
+    player = _seat(ctx, args)
+    result = legal_actions(ctx.view(), ctx.kb, player)
+    ctx.coverage.append({"tool": "legal_actions", "coverage": "engine"})
+    return result
+
+
+def _diff(before: dict, after: dict) -> dict:
+    """What changed between two dumped perspective views."""
+    out: dict = {}
+    old_map = {s["position"]: s for s in before.get("map", [])}
+    changed = [s for s in after.get("map", []) if old_map.get(s["position"]) != s]
+    if changed:
+        out["systems"] = changed
+    players = {}
+    for pid, p in after.get("players", {}).items():
+        fields = {k: v for k, v in p.items() if before["players"].get(pid, {}).get(k) != v}
+        if fields:
+            players[pid] = fields
+    if players:
+        out["players"] = players
+    turn = {k: v for k, v in after.get("turn", {}).items() if before.get("turn", {}).get(k) != v}
+    if turn:
+        out["turn"] = turn
+    if after.get("hand") != before.get("hand"):
+        out["hand"] = after.get("hand")
+    return out
+
+
+def _apply_action(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.apply import ApplyRefused, HiddenInformation, apply_action
+    from warlord.state.perspective import project
+
+    if ctx.store is None or ctx.game_id is None:
+        raise ToolError("No game is open.")
+    action = args.get("action")
+    if not isinstance(action, dict):
+        raise ToolError("action must be an object in the canonical action format")
+    state = ctx.store.load(ctx.game_id)
+    try:
+        result = apply_action(state, action, ctx.kb, viewer=ctx.viewer)
+    except ApplyRefused as e:
+        return {"applied": False, "illegal": [v.to_dict() for v in e.violations]}
+    except HiddenInformation as e:
+        raise ToolError(str(e)) from e
+    except (KeyError, ValueError) as e:
+        raise ToolError(f"could not apply the action: {e}") from e
+    before = project(state, ctx.viewer).model_dump(mode="json", exclude={"log"})
+    after = project(result["state"], ctx.viewer).model_dump(mode="json", exclude={"log"})
+    ctx.coverage.append({"tool": "apply_action", "coverage": "engine" if result["verified"] else "text_only"})
+    return {
+        "applied": True,
+        "what_if": "Nothing was saved; this shows the state after the action.",
+        "verified": result["verified"],
+        "unchecked": result["unchecked"],
+        "warnings": result["warnings"],
+        "events": result["events"],
+        "pending": result["pending"],
+        "not_applied": result["not_applied"],
+        "changes": _diff(before, after),
+    }
+
+
+def _evaluate_position(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.evaluate import evaluate_position
+
+    player = _seat(ctx, args)
+    return evaluate_position(ctx.view(), ctx.kb, player)
+
+
 def _not_yet(name: str) -> Callable[[ToolContext, dict], dict]:
     def handler(ctx: ToolContext, args: dict) -> dict:
         ctx.coverage.append({"tool": name, "coverage": "text_only"})
@@ -258,15 +340,15 @@ TOOL_DEFS: dict[str, dict] = {
         },
     },
     "legal_actions": {
-        "description": "Option families available to a player now: activatable systems with reachable units, unused strategy cards, component actions, responses to the open window, and whether passing is allowed.",
+        "description": "Option families available to a player now: systems they can activate, with the ship groups that can reach each one; unused strategy cards; component actions; responses to the open window; and whether passing is allowed (and why not). Draft a concrete action from an option, then run validate_action on it.",
         "input_schema": {"type": "object", "properties": {"player": {"type": "string"}}},
     },
     "apply_action": {
-        "description": "Apply an action to a copy of the state and return the next state and event log, for what-if questions.",
+        "description": "What-if: apply an action to a copy of the game (nothing is saved). Returns what changed, the events, and what is pending, such as a space combat or ground combat to resolve with combat_sim. Card effects the engine doesn't model are listed under not_applied. Illegal actions are refused with the violations.",
         "input_schema": {"type": "object", "properties": {"action": {"type": "object"}}, "required": ["action"]},
     },
     "evaluate_position": {
-        "description": "Heuristic position summary for a player: objective progress, VP race, threats, resources and influence available.",
+        "description": "Heuristic summary of a player's position, from the asking player's view: the VP race and scored public objectives, spending power (ready resources and influence, trade goods, command tokens), and threats (other players' ships that could reach the player's systems next turn, with expected hits). Not a verdict: weigh it.",
         "input_schema": {"type": "object", "properties": {"player": {"type": "string"}}},
     },
 }
@@ -277,13 +359,14 @@ HANDLERS: dict[str, Callable[[ToolContext, dict], dict]] = {
     "card_lookup": _card_lookup,
     "validate_action": _validate_action,
     "combat_sim": _combat_sim,
-    "legal_actions": _not_yet("legal_actions"),
-    "apply_action": _not_yet("apply_action"),
-    "evaluate_position": _not_yet("evaluate_position"),
+    "legal_actions": _legal_actions,
+    "apply_action": _apply_action,
+    "evaluate_position": _evaluate_position,
 }
 
 IMPLEMENTED = ("get_state", "rules_lookup", "card_lookup", "validate_action", "combat_sim")
-REFEREE_TOOLS = IMPLEMENTED  # the advisor will add legal_actions, apply_action, evaluate_position
+REFEREE_TOOLS = IMPLEMENTED
+ADVISOR_TOOLS = (*IMPLEMENTED, "legal_actions", "apply_action", "evaluate_position")
 
 
 def tool_definitions(names=REFEREE_TOOLS) -> list[dict]:

@@ -51,7 +51,7 @@ The player's agent writes the final answer, and our server never sees it. Anythi
 | `validate_action` | As today, plus a `status_line` field. |
 | `combat_sim` | As today. |
 | `check_ruling` | Input: the draft answer, its citations and the claimed verified flag. Output: problems found, the verified label the session supports, and quotes to shorten. Runs `Referee.enforce`'s checks against the session record. |
-| `legal_actions`, `apply_action`, `evaluate_position` | Listed only once implemented (advisor). |
+| `legal_actions`, `apply_action`, `evaluate_position` | Advisor tools: option families, what-ifs on a copy of the game, and a position summary. |
 
 **Prompts.** `referee` and, later, `advisor`, carrying today's referee instructions: precedence, citations, verification, paraphrasing and hidden information. Clients that support MCP prompts show them as commands; the tool descriptions repeat the essentials for clients that don't.
 
@@ -108,7 +108,7 @@ The `Referee` code and its tests stay in the repo so this mode is ready to switc
 | M3 ✅ | `check_ruling` + `referee` prompt | The checks from `Referee.enforce` run over MCP; tests cover each check | — |
 | M4 ✅ | Movement range, capacity, fleet supply in the engine | Common tactical actions come back engine-verified instead of unverified | — |
 | M5 ✅ | Manual eval kit | Question set (start with 50 from set A) + transcript scorer | Review and approve the questions |
-| M6 | Advisor tools (`legal_actions`, `apply_action`, `evaluate_position`) + `advisor` prompt | Advice validated by the engine before it is given | Review sample advice |
+| M6 ✅ | Advisor tools (`legal_actions`, `apply_action`, `evaluate_position`) + `advisor` prompt | Advice validated by the engine before it is given | Review sample advice |
 | Later | API-key mode | See above | API key, hosting choice |
 
 ## Risks
