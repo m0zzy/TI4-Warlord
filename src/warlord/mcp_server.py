@@ -232,16 +232,21 @@ def build_server(session: Session) -> MCPServer:
 
     @server.tool(description=TOOL_DEFS["combat_sim"]["description"])
     def combat_sim(
-        attacker: dict,
-        defender: dict,
+        from_game: dict | None = None,
+        attacker: dict | None = None,
+        defender: dict | None = None,
+        bombard: dict | None = None,
+        kind: str = "space",
         trials: int = 5000,
         space_cannon: bool = True,
         afb: bool = True,
     ) -> dict:
-        return session.call(
-            "combat_sim",
-            {"attacker": attacker, "defender": defender, "trials": trials, "space_cannon": space_cannon, "afb": afb},
-        )
+        args = {"trials": trials, "space_cannon": space_cannon, "afb": afb, "kind": kind}
+        if from_game:
+            args["from_game"] = from_game
+        else:
+            args.update(attacker=attacker, defender=defender, bombard=bombard)
+        return session.call("combat_sim", args)
 
     # -------------------------------------------------------------- advisor
 

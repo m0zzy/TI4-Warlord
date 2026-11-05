@@ -155,15 +155,47 @@ def status_line(result: dict) -> str:
 
 
 def _combat_sim(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.combat import ground_combat_sim
+    from warlord.engine.combat_setup import SetupError, describe, sides_from_game
+
+    trials = int(args.get("trials") or 5000)
+    game = args.get("from_game")
     try:
-        result = combat_sim(
-            args["attacker"],
-            args["defender"],
-            trials=int(args.get("trials") or 5000),
-            space_cannon=bool(args.get("space_cannon", True)),
-            afb=bool(args.get("afb", True)),
-            seed=args.get("seed"),
-        )
+        if game:
+            view = ctx.view()
+            if view is None:
+                raise ToolError("from_game needs an open game.")
+            setup = sides_from_game(
+                view, ctx.kb, game.get("system", ""), game.get("attacker"), game.get("defender"),
+                game.get("attacker_units"), game.get("kind", "space"), game.get("planet"), game.get("bombard_units"),
+            )
+            if setup["kind"] == "ground":
+                result = ground_combat_sim(setup["attacker"], setup["defender"], bombard=setup["bombard"],
+                                           trials=trials, seed=args.get("seed"))
+            else:
+                result = combat_sim(setup["attacker"], setup["defender"], trials=trials,
+                                    space_cannon=bool(args.get("space_cannon", True)), afb=bool(args.get("afb", True)),
+                                    seed=args.get("seed"))
+            result["inputs"] = {
+                **setup["who"],
+                "attacker": describe(setup["attacker"]),
+                "defender": describe(setup["defender"]),
+                **({"bombard": describe(setup["bombard"])} if setup.get("bombard") else {}),
+            }
+        elif args.get("kind") == "ground":
+            result = ground_combat_sim(args["attacker"], args["defender"], bombard=args.get("bombard"),
+                                       trials=trials, seed=args.get("seed"))
+        else:
+            result = combat_sim(
+                args["attacker"],
+                args["defender"],
+                trials=trials,
+                space_cannon=bool(args.get("space_cannon", True)),
+                afb=bool(args.get("afb", True)),
+                seed=args.get("seed"),
+            )
+    except SetupError as e:
+        raise ToolError(str(e)) from e
     except (KeyError, TypeError, ValueError) as e:
         raise ToolError(f"bad combat_sim input: {e}") from e
     ctx.coverage.append({"tool": "combat_sim", "coverage": "engine"})
@@ -326,17 +358,22 @@ TOOL_DEFS: dict[str, dict] = {
         },
     },
     "combat_sim": {
-        "description": "Monte Carlo space combat odds: win/draw/loss, expected survivors, hits needed and expected hits per round. Models space cannon offense, anti-fighter barrage, Sustain Damage and combat rounds; not retreats or card effects beyond modifiers. Always use this instead of estimating odds.",
+        "description": "Monte Carlo combat odds. Space combat models space cannon offense, anti-fighter barrage, Sustain Damage and combat rounds. Ground combat (kind 'ground') models bombardment, planetary shields, space cannon defense, Sustain Damage and combat rounds. Neither models retreats or card effects beyond modifiers. Prefer from_game, which reads both sides from the open game (units, damage, upgrades, faction units, PDS including adjacent PDS II), e.g. {\"system\":\"201\",\"attacker_units\":{\"dreadnought\":2,\"carrier\":1}} for a planned attack, or {\"system\":\"201\",\"kind\":\"ground\",\"planet\":\"quann\",\"attacker_units\":{\"infantry\":3}}. Always use this instead of estimating odds.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "from_game": {
+                    "type": "object",
+                    "description": "Read the sides from the open game: system, optional attacker/defender seats, attacker_units (the units that would arrive), kind ('space' or 'ground'), planet and bombard_units (the attacker's ships there) for ground.",
+                },
                 "attacker": _SIDE,
                 "defender": _SIDE,
+                "bombard": {**_SIDE, "description": "Ground combat: the attacker's ships in the system, for bombardment."},
+                "kind": {"type": "string", "enum": ["space", "ground"]},
                 "trials": {"type": "integer", "minimum": 100, "maximum": 50000},
                 "space_cannon": {"type": "boolean"},
                 "afb": {"type": "boolean"},
             },
-            "required": ["attacker", "defender"],
         },
     },
     "legal_actions": {

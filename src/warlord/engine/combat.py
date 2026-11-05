@@ -58,12 +58,13 @@ class _Fleet:
 
     __slots__ = ("side", "healthy", "hurt")
 
-    def __init__(self, side: Side):
+    def __init__(self, side: Side, ground: bool = False):
         self.side = side
         self.healthy: dict[str, int] = {}
         self.hurt: dict[str, int] = {}
         for u, n in side.units.items():
-            if not side.stats(u).is_ship:
+            st = side.stats(u)
+            if not (st.is_ground if ground else st.is_ship):
                 continue
             d = min(side.damaged.get(u, 0), n)
             self.healthy[u] = n - d
@@ -248,3 +249,96 @@ def combat_sim(
             "ground combat and invasion",
         ],
     }
+
+
+def ground_combat_sim(
+    attacker: dict | Side,
+    defender: dict | Side,
+    *,
+    bombard: dict | Side | None = None,
+    planetary_shield: bool | None = None,
+    space_cannon_defense: bool = True,
+    trials: int = 5000,
+    max_rounds: int = 30,
+    seed: int | None = None,
+) -> dict:
+    """Invasion odds on one planet (LRR 49, 42).
+
+    1. Bombardment: the attacker's ships in the system with BOMBARDMENT roll
+       at the defender's ground forces. A planet with a Planetary Shield unit
+       (a PDS) cannot be bombarded unless the attacker has a war sun there.
+    2. Space cannon defense: the defender's PDS on the planet fire at the
+       ground forces that land.
+    3. Ground combat rounds until one side has no ground forces left. Mechs
+       use Sustain Damage.
+
+    ``attacker``/``defender`` hold ground forces (and, for the defender, the
+    planet's PDS). ``bombard`` is the attacker's ships in the system.
+    """
+    a = attacker if isinstance(attacker, Side) else Side.from_dict(attacker)
+    d = defender if isinstance(defender, Side) else Side.from_dict(defender)
+    b = None if bombard is None else (bombard if isinstance(bombard, Side) else Side.from_dict(bombard))
+    trials = max(1, min(int(trials), 50_000))
+    rng = random.Random(seed)
+
+    has_pds = any(d.stats(u).space_cannon is not None and n > 0 for u, n in d.units.items())
+    shielded = has_pds if planetary_shield is None else planetary_shield
+    if b is not None and any(canonical(u) == "war_sun" and n > 0 for u, n in b.units.items()):
+        shielded = False  # a war sun disables Planetary Shield
+
+    wins = draws = losses = 0
+    rounds_total = 0
+    bombard_hits = 0
+    surv_a: dict[str, float] = {}
+    surv_d: dict[str, float] = {}
+    for _ in range(trials):
+        fa, fd = _Fleet(a, ground=True), _Fleet(d, ground=True)
+        if b is not None and not shielded:
+            shooters = _Fleet.__new__(_Fleet)
+            shooters.side = b
+            shooters.healthy = {u: n for u, n in b.units.items() if b.stats(u).bombard is not None}
+            shooters.hurt = {}
+            h = shooters.roll(rng, "bombard", 0)
+            bombard_hits += h
+            fd.assign(h)
+        if space_cannon_defense:
+            fa.assign(_space_cannon_shooters(d).roll(rng, "space_cannon", d.space_cannon_modifier))
+        rounds = 0
+        while fa.ships() and fd.ships() and rounds < max_rounds:
+            ha = fa.roll(rng, "combat", a.combat_modifier)
+            hd = fd.roll(rng, "combat", d.combat_modifier)
+            fd.assign(ha)
+            fa.assign(hd)
+            rounds += 1
+        rounds_total += rounds
+        a_alive, d_alive = fa.ships() > 0, fd.ships() > 0
+        if a_alive and not d_alive:
+            wins += 1
+        elif d_alive and not a_alive:
+            losses += 1
+        else:
+            draws += 1
+        for u, n in fa.survivors().items():
+            surv_a[u] = surv_a.get(u, 0) + n
+        for u, n in fd.survivors().items():
+            surv_d[u] = surv_d.get(u, 0) + n
+
+    def avg(m: dict[str, float]) -> dict[str, float]:
+        return {u: round(v / trials, 3) for u, v in sorted(m.items())}
+
+    return {
+        "kind": "ground",
+        "trials": trials,
+        "attacker_takes_planet": round(wins / trials, 4),
+        "both_destroyed": round(draws / trials, 4),
+        "defender_holds": round(losses / trials, 4),
+        "expected_rounds": round(rounds_total / trials, 2),
+        "expected_survivors": {"attacker": avg(surv_a), "defender": avg(surv_d)},
+        "bombardment": "blocked by Planetary Shield" if (b is not None and shielded) else
+                       (f"{bombard_hits / trials:.2f} expected hits" if b is not None else "none"),
+        "modelled": ["bombardment", "planetary shield", "space cannon defense", "sustain damage (mechs)",
+                     "ground combat rounds"],
+        "not_modelled": ["faction abilities and action cards beyond modifiers and stat overrides",
+                         "the defender's choice to not fire space cannon"],
+    }
+

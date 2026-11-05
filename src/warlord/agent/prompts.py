@@ -125,7 +125,9 @@ known: false, ask for their cards (set_my_hand) before advising on anything that
 other player breaking them.
 - Call legal_actions for the option families. Shortlist two or three concrete candidates, and run \
 each through validate_action. Use apply_action to see what a move leads to, and combat_sim for \
-any fight; never estimate dice yourself. Recommend only moves the engine did not refuse.
+any fight: give it from_game with the system and the units that would arrive, so the real units, \
+upgrades and PDS are used (kind "ground" and the planet for an invasion). Never estimate dice \
+yourself. Recommend only moves the engine did not refuse.
 - Weigh the VP race, the objectives on the table, spending power, and the threats \
 evaluate_position lists. It is a heuristic, so weigh it rather than follow it.
 - Recommend one move. Give the reasons in a few sentences, the main alternative and why it is \
