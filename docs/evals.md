@@ -51,4 +51,10 @@ The score checks these against the design doc's pass bars:
 | label_honesty | Rules-text answers say "Unverified"; engine-checked moves say "Engine-verified" | 100% |
 | no_long_quotes | No passage copies more than 20 words of rules or card text | 100% |
 
-Add `--json` for a machine-readable report. The "Needs a look" list names each failing question and what went wrong.
+Add `--json` for a machine-readable report.
+
+## Legality cases (set B)
+
+`warlord datasets legality --games data/private/games --kb ~/.local/share/warlord/kb --out data/private/datasets` generates legality cases from your stored games. For example, the 50 completed games from `warlord fetch-asyncti4 completed`.
+
+For every seat, it samples candidate actions on the board as stored, and again as at the start of that seat's action phase. It keeps only cases the engine decides fully, balanced between legal and illegal. Each case's perspective view is saved under `states/`, so the case replays to the same verdict. The games hold FFG card ids and players' hidden cards, so keep the output under `data/private/`. The "Needs a look" list names each failing question and what went wrong.

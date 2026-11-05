@@ -186,6 +186,15 @@ def cmd_eval(args) -> int:
     return 0
 
 
+def cmd_datasets(args) -> int:
+    from warlord.datasets.generate import write_set_b
+
+    store = GameStore(args.games)
+    states = [store.load(g) for g in store.list_games()]
+    print(json.dumps(write_set_b(states, _kb(args.kb), args.out, per_seat=args.per_seat, seed=args.seed), indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="warlord", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -274,6 +283,15 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_eval)
+
+    ds = sub.add_parser("datasets", help="generate example datasets from stored games")
+    ds.add_argument("which", choices=["legality"], help="legality: set B, engine-decided legality cases")
+    ds.add_argument("--games", default=_default("data/private/games", "data/sample/games"))
+    ds.add_argument("--kb", action="append")
+    ds.add_argument("--out", default="data/private/datasets")
+    ds.add_argument("--per-seat", type=int, default=20)
+    ds.add_argument("--seed", type=int, default=0)
+    ds.set_defaults(func=cmd_datasets)
 
     r = sub.add_parser("import-rules", help="convert an official rules PDF to KB rule records")
     r.add_argument("pdf")
