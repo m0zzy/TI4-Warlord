@@ -385,7 +385,7 @@ TOOL_DEFS: dict[str, dict] = {
         "input_schema": {"type": "object", "properties": {"action": {"type": "object"}}, "required": ["action"]},
     },
     "evaluate_position": {
-        "description": "Heuristic summary of a player's position, from the asking player's view: the VP race and scored public objectives, spending power (ready resources and influence, trade goods, command tokens), and threats (other players' ships that could reach the player's systems next turn, with expected hits). Not a verdict: weigh it.",
+        "description": "Heuristic summary of a player's position, from the asking player's view: the VP race, each revealed public objective with whether the player could score it now and how far off they are, spending power (ready resources and influence, trade goods, command tokens), and threats (other players' ships that could reach the player's systems next turn, with expected hits). Not a verdict: weigh it.",
         "input_schema": {"type": "object", "properties": {"player": {"type": "string"}}},
     },
 }

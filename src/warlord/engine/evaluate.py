@@ -10,9 +10,11 @@ From the asking player's view only:
   expected hits per round. This ignores their command tokens, which return
   at the end of the round.
 
-It does not judge objective progress (each objective's requirement would
-need modelling), score positions, or recommend moves: the agent weighs
-these numbers.
+* objective progress: for each revealed public objective, whether the player
+  could score it now, and how far off they are (engine/objectives.py).
+
+It does not judge secret objectives, score positions, or recommend moves:
+the agent weighs these numbers.
 """
 
 from __future__ import annotations
@@ -54,19 +56,22 @@ def evaluate_position(view, kb, player: str | None = None) -> dict:
         spend["note"] = "planet values unknown without the knowledge base"
 
     threats = _threats(view, kb, player)
+    from warlord.engine.objectives import objective_progress
+
     revealed = {o: [pid for pid, p in view.players.items() if o in p.scored] for o in view.objectives.public_revealed}
+    progress = {e["id"]: e for e in objective_progress(view, kb, player)}
     return {
         "player": player,
         "round": view.turn.round,
         "vp_target": view.meta.vp_target,
         "vp_race": race,
         "public_objectives": [
-            {"id": o, "scored_by": who, "scored_by_you": player in who} for o, who in revealed.items()
+            {**progress.get(o, {"id": o}), "scored_by": who} for o, who in revealed.items()
         ],
         "secret_objectives_in_hand": len(view.hand.secret_objectives) if view.viewer == player else None,
         "spending_power": spend,
         "threats": threats,
-        "not_assessed": ["objective progress", "agenda and law effects", "action cards in opponents' hands"],
+        "not_assessed": ["secret objective progress", "agenda and law effects", "action cards in opponents' hands"],
     }
 
 

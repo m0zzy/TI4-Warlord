@@ -72,7 +72,7 @@ def test_evaluate_position(view, kb):
     assert [r["player"] for r in ev["vp_race"]][:2] == ["p2", "p3"] or ev["vp_race"][0]["vp"] == 4
     assert ev["spending_power"]["trade_goods"] == 5 and ev["secret_objectives_in_hand"] == 1
     assert any(t["by"] == "p2" and t["to"] == "101" for t in ev["threats"])
-    assert ev["public_objectives"][0]["scored_by_you"] is True
+    assert ev["public_objectives"][0]["status"] == "scored" and "p3" in ev["public_objectives"][0]["scored_by"]
 
 
 def test_tools_through_registry(kb, store):
