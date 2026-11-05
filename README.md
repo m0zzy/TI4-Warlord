@@ -1,47 +1,16 @@
 # TI4 Warlord
 
-A rules referee and, later, a strategy advisor for Twilight Imperium 4: base game, Prophecy of Kings and Thunder's Edge, with Codex content where a game's decks use it.
-The design is in [`docs/design.md`](docs/design.md). Three principles drive it:
+A rules referee and strategy advisor for Twilight Imperium 4, covering the base game, Prophecy of Kings and Thunder's Edge (with Codex content where a game's decks use it). It runs as an **MCP server**, so your own Claude client does the reasoning while Warlord supplies what has to be right: one player's view of the game, the rules and cards, a legality engine, and combat odds.
 
-- **The engine decides legality.** Where the engine has no coverage, the agent answers from the rules text and marks the answer *unverified*.
-- **Every rules answer cites a source**, either a rule, a card or a ruling.
-- **Advice comes from one seat.** The agent only ever sees one player's perspective view.
+The design is in [`docs/design.md`](docs/design.md), and the delivery plan in [`docs/mcp-plan.md`](docs/mcp-plan.md). Three principles drive it:
 
-## Status against the build order
+- **The engine decides legality.** Where the engine has no coverage, the answer comes from the rules text and is labelled *unverified*.
+- **Every rules answer cites a source:** a rule number, a card, or a ruling.
+- **Advice comes from one seat.** The agent only ever sees the asking player's view, and opponents' hidden cards are never sent to it.
 
-| # | Step | State |
-|---|------|-------|
-| 1 | State schema + perspective projection | Done: `warlord.state`. Games import from AsyncTI4's public API: live games as public views, completed games (capped at 50) with full hidden information. |
-| 2 | Knowledge base + `rules_lookup` / `card_lookup` | Done: `warlord.kb`. It has an AsyncTI4 component importer covering every card type, factions, tiles and planets (1,221 records on the real data), and a rules PDF importer for LRR 2.0 and the Thunder's Edge rulebook. The repo ships only sample records; you run the importers yourself. |
-| 3 | Referee v0 (text-only, cited) | Done: `warlord.agent.Referee`. Code enforces the citation and verification rules. |
-| 4 | Engine `validate_action` | Partial, citing LRR numbers. It checks turn order, passing, tactic tokens, activation, held strategy cards, cards in hand and open windows. Movement is checked in full: range along adjacency (wormholes, wormhole tokens, hyperlanes), anomalies, other players' ships, gravity rifts, Gravity Drive, Antimass and Light/Wave Deflector, Fighter II, transport capacity, and capacity and fleet pool afterwards. Strategy card primaries are checked for all eight cards, including Thunder's Edge's Construction and Warfare. Warfare's free tactical action goes through the full tactical checks. Invasion (committing ground forces) and production (production limit, cost and payment, Sarween Tools, War Sun and flagship limits, blockades) are checked too. Where the space combat's result decides what's allowed, the result is "unverified". Cards it doesn't model are found from their text, and turn a result into "unverified" rather than a wrong verdict. |
-| 5 | `combat_sim` | Done. Space combat covers space cannon offense, AFB, Sustain Damage and combat rounds. Ground combat covers bombardment, planetary shields, space cannon defense and mechs' Sustain Damage. `from_game` reads both sides from the game: units, damage, upgrades, faction units, and PDS including adjacent PDS II. |
-| 6 | Advisor (`legal_actions`, `apply_action`, `evaluate_position`) | Done, with an `advisor` MCP prompt. `legal_actions` groups the options (activatable systems with the ships that reach them, unused strategy cards, component actions, responses, passing). `apply_action` is a what-if on a copy that stops at combats rather than inventing dice. `evaluate_position` summarizes the VP race, progress on each revealed public objective (all 40 PoK objectives are modelled), spending power and threats. Opponents' card plays are refused as what-ifs, since they'd depend on hidden cards. |
-| 7–8 | Annotation rounds, further content | Dataset schemas and the by-game split are in place. `warlord datasets legality` generates set B from your stored games: engine-decided cases, balanced legal/illegal, each with the view it was judged on. Thunder's Edge is in v1 scope: rulesets name the decks a game uses, so lookups return the right printing. |
+## Use it from Claude
 
-## Delivery
-
-The plan is to ship as an **MCP server**, so each player's own agent (Claude Desktop, Claude Code, …) does the reasoning and calls these tools. An API-key mode that runs the model ourselves may come later. See [`docs/mcp-plan.md`](docs/mcp-plan.md). The built-in `warlord ask` referee below is that later mode's starting point, and is how automated evals will run.
-
-## Layout
-
-```
-src/warlord/
-  ruleset.py            ruleset tags (base / pok / codex / thunders_edge)
-  state/                omniscient GameState, PerspectiveView, project(), GameStore
-  actions.py            canonical action format (tactical, strategic, component, transaction, pass, respond)
-  kb/                   record types, errata, hybrid search, AsyncTI4 component importer
-  engine/               validate_action (partial), unit stats, combat_sim
-  tools/registry.py     the 8 tool definitions + handlers, bound to one game and one seat
-  agent/                referee prompt, output schema, tool-use loop, contract enforcement
-  datasets/schemas.py   record types for sets A–F, split_by_game
-  evals/checks.py       citation validity, legality agreement, text-only honesty, leak detection
-data/sample/            sample game + sample KB (paraphrased placeholders, not the LRR)
-```
-
-## Use it from Claude (MCP)
-
-1. Install, with PDF support for the rules import:
+1. Install:
 
    ```bash
    pip install -e '.[pdf]'
@@ -53,39 +22,68 @@ data/sample/            sample game + sample KB (paraphrased placeholders, not t
    warlord setup
    ```
 
-   This downloads the [Living Rules Reference 2.0](https://images-cdn.fantasyflightgames.com/filer_public/51/55/51552c7f-c05c-445b-84bf-4b073456d008/ti10_pok_living_rules_reference_20_web.pdf) and the [Thunder's Edge rulebook](https://images-cdn.fantasyflightgames.com/filer_public/ca/e7/cae7706f-cdb5-4ee1-a20c-7f76a13d135c/te_rulebook_web.pdf) from Fantasy Flight Games, and sparse-clones the AsyncTI4 card data with git (about 15 MB). It then builds and checks the knowledge base, which takes about 15 seconds. Pass `--lrr`, `--te-rulebook` or `--asyncti4` to use files you already have, or `--no-download` to fetch nothing. Everything goes to `~/.local/share/warlord` (or `$WARLORD_DATA`, or `--data DIR`). The report ends with checks such as "101 LRR topics" and "every engine rule reference is in the LRR".
+   This downloads the [Living Rules Reference 2.0](https://images-cdn.fantasyflightgames.com/filer_public/51/55/51552c7f-c05c-445b-84bf-4b073456d008/ti10_pok_living_rules_reference_20_web.pdf) and the [Thunder's Edge rulebook](https://images-cdn.fantasyflightgames.com/filer_public/ca/e7/cae7706f-cdb5-4ee1-a20c-7f76a13d135c/te_rulebook_web.pdf) from Fantasy Flight Games, and sparse-clones AsyncTI4's card data with git (about 15 MB). It then builds and checks the knowledge base in about 15 seconds, and the report ends with checks such as "101 LRR topics".
 
-   The rules and card text are Fantasy Flight Games' copyright, so Warlord never ships them: each player's copy comes straight from FFG. See [`docs/public-release.md`](docs/public-release.md) before distributing Warlord publicly.
+   Everything goes to `~/.local/share/warlord` (or `$WARLORD_DATA`, or `--data DIR`). Pass `--lrr`, `--te-rulebook` or `--asyncti4` to use files you already have, or `--no-download` to fetch nothing. The rules and card text are FFG's copyright, so Warlord never ships them; see [`docs/public-release.md`](docs/public-release.md) before distributing Warlord.
 
-3. Connect it to your client.
-
-   In **Claude Code**:
+3. Connect it. In **Claude Code**, run this from the clone, with the virtual environment active:
 
    ```bash
-   claude mcp add warlord -- warlord mcp
+   claude mcp add warlord -- "$(which warlord)" mcp
    ```
 
-   In **Claude Desktop**, add this to `claude_desktop_config.json`:
+   In **Claude Desktop**, add the same full path to `claude_desktop_config.json`:
 
    ```json
-   {"mcpServers": {"warlord": {"command": "warlord", "args": ["mcp"]}}}
+   {"mcpServers": {"warlord": {"command": "/full/path/to/.venv/bin/warlord", "args": ["mcp"]}}}
    ```
 
-4. Ask a question. Use the `referee` prompt, or just ask: "Import AsyncTI4 game pbd12345, I'm ghost: can my carrier in 205 reach 301 this turn?" The agent calls `fetch_live_game`, `open_game`, `set_my_hand` (it will ask for your cards), `get_state`, the lookups and `validate_action`, and repeats the engine's status line.
+4. Ask. Use the `referee` prompt for rules and legality, or the `advisor` prompt for what to do. For example: "Import AsyncTI4 game pbd12345, I'm ghost: what should I do this turn?"
 
-To check the referee's answers, use the manual eval kit: 50 questions, a template for recording your agent's answers, and a scorer. See [`docs/evals.md`](docs/evals.md).
+### The tools
 
-## Quick start (command line)
+| Tool | What it does |
+| --- | --- |
+| `list_games`, `open_game`, `fetch_live_game`, `set_my_hand` | Import a live AsyncTI4 game (public view), open it as your seat, and enter your own hidden cards. |
+| `get_state` | Your seat's view: the map, every player's public information, your hand, and opponents' hands as counts. |
+| `rules_lookup`, `card_lookup` | Search the LRR and the Thunder's Edge rulebook, and look up cards with the printing your game uses. |
+| `validate_action` | The legality engine, with a `status_line` to repeat. |
+| `check_ruling` | Checks a drafted ruling's citations, its "verified" claim, and its quoting before the agent answers. |
+| `combat_sim` | Space or ground combat odds, built `from_game` from the real units, upgrades and PDS. |
+| `legal_actions`, `apply_action`, `evaluate_position` | Advisor tools: option families, what-ifs on a copy of the game, and a position summary with objective progress and threats. |
 
-```bash
-pip install -e '.[dev]'
-```
+## What the engine checks
 
-```bash
-pytest
-```
+`validate_action` returns **legal**, **illegal** (with LRR rule numbers), or **not verified** (listing what it couldn't check):
 
-Inspect what one seat can see, check a move, and get combat odds (no API key needed):
+- **Turn and passing:** turn order, passing (including unused strategy cards), cards in hand, and open timing windows.
+- **Activation and movement:**
+  - activation, tactic tokens, and units present;
+  - range along adjacency: wormholes, wormhole tokens and hyperlanes;
+  - anomalies, other players' ships, and gravity rifts;
+  - Gravity Drive, Antimass Deflectors, Light/Wave Deflector and Fighter II;
+  - transport capacity, plus capacity and fleet-pool warnings.
+- **Invasion and production:**
+  - committing ground forces;
+  - production limits and cost, payment and Sarween Tools;
+  - blockades, and War Sun and flagship limits.
+- **Strategy cards:** the primary-ability choices for all eight cards, including Thunder's Edge's Construction and Warfare.
+- **When it says "not verified":**
+  - when a combat's result decides what's allowed;
+  - for The Fracture, and the custodians token on Mecatol Rex;
+  - when a card the engine doesn't model could change the answer. Those cards are found from their text, so a reported verdict is never one an unmodelled card would overturn.
+
+`evaluate_position` judges all 40 PoK public objectives, and the state-checkable secret objectives in your own hand. It also lists threats: other players' ships that can reach you next turn, with expected hits.
+
+## Checking it
+
+- **Tests:** `pytest`, also run by CI on every push.
+- **Agent answers:** the manual eval kit has 50 draft questions, an answer template and a scorer; see [`docs/evals.md`](docs/evals.md).
+- **Legality cases:** `warlord datasets legality` generates engine-decided legality cases (example set B) from your stored games.
+
+## Command line
+
+The same engine works without a Claude client, on the sample game:
 
 ```bash
 warlord view --game pbd00000 --viewer p3
@@ -99,7 +97,14 @@ warlord validate '{"type":"tactical","player":"p3","activate":"201","moves":[{"f
 warlord combat '{"units":{"dreadnought":2,"carrier":1,"fighter":3}}' '{"units":{"cruiser":2,"destroyer":1,"pds":1}}'
 ```
 
-Ask the built-in referee (API-key mode, for later). It calls the Claude API, so it needs the `api` extra and `ANTHROPIC_API_KEY`:
+Other commands:
+- `warlord fetch-asyncti4 live|completed` imports games. Completed games are capped at 50, for datasets.
+- `warlord import-rules` and `warlord import-asyncti4` run the importers by hand.
+- `warlord eval ...` runs the eval kit.
+
+### API-key mode (later)
+
+`warlord ask` runs the built-in referee: our own Claude call, with the checks enforced after the model answers. That guarantees citations, labels and paraphrasing, which over MCP are only advised. It needs the `api` extra and `ANTHROPIC_API_KEY`:
 
 ```bash
 pip install -e '.[api]'
@@ -109,17 +114,23 @@ pip install -e '.[api]'
 warlord ask "Can my cruiser in 101 join an attack on 201 this turn?" --game pbd00000 --viewer p3
 ```
 
-## How the referee keeps its promises
+## Layout
 
-The model drafts a structured answer (`ruling`, `answer`, `citations`, `verified`, …). Then `Referee.enforce` applies these rules in code:
+```
+src/warlord/
+  mcp_server.py         the MCP server (stdio)
+  setup.py, paths.py    warlord setup and the data folder
+  ruleset.py            content tags and per-game decks (PoK, Thunder's Edge)
+  state/                GameState, perspective views, the game store, AsyncTI4 game import
+  actions.py            the canonical action format
+  kb/                   knowledge base, search, errata, AsyncTI4 card and rules PDF importers
+  engine/               validate_action, movement, invasion and production, strategy cards,
+                        geometry, combat, what-ifs (apply), options, objectives, evaluation
+  tools/                tool definitions and handlers, and check_ruling
+  agent/                prompts (referee, advisor), quote checks, the API-key referee
+  datasets/, evals/     example-set schemas, set B generation, the eval kit and checks
+  data/                 package data: LRR rule refs, AsyncTI4 colors, eval questions and game
+data/sample/            a sample game and knowledge base (paraphrased placeholders, not the LRR)
+```
 
-- A citation is kept only if its id appeared in a tool result during this conversation. Anything else is dropped and reported.
-- An answer is **verified** only if `validate_action` ran with `coverage: "engine"` and no step fell back to text-only coverage. Pure rules questions are therefore always unverified in v0, as the design requires.
-- `get_state` refuses any seat other than the asking player, and the engine only ever runs on that seat's perspective view.
-- Answers paraphrase and cite instead of reproducing rule or card text, because this is a shared tool and the text is copyrighted. If an answer copies more than 20 consecutive words from a source record, the referee asks the model to rewrite it once. If the long quote is still there, it is cut and replaced with a pointer to the cited source (`trimmed_quotes` in the result).
-
-Requests use `claude-opus-5-5` with adaptive thinking, a JSON-schema output format, prompt caching (the system prompt and tool list are byte-stable; the game id goes in the user message), and server-side refusal fallback (`fallbacks: "default"`). Pass `fallbacks=False` to `Referee` to turn that off.
-
-## Loading real data
-
-See [`docs/knowledge-base.md`](docs/knowledge-base.md). In short: real LRR, card and AsyncTI4 data goes under `data/private/`, which is git-ignored because the text is Fantasy Flight Games' copyright. The CLI uses `data/private/kb` when it exists and falls back to `data/sample/kb`.
+More on the data: [`docs/knowledge-base.md`](docs/knowledge-base.md).
