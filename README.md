@@ -73,6 +73,8 @@ data/sample/            sample game + sample KB (paraphrased placeholders, not t
 
 4. Ask a question. Use the `referee` prompt, or just ask: "Import AsyncTI4 game pbd12345, I'm ghost: can my carrier in 205 reach 301 this turn?" The agent calls `fetch_live_game`, `open_game`, `set_my_hand` (it will ask for your cards), `get_state`, the lookups and `validate_action`, and repeats the engine's status line.
 
+To check the referee's answers, use the manual eval kit: 50 questions, a template for recording your agent's answers, and a scorer. See [`docs/evals.md`](docs/evals.md).
+
 ## Quick start (command line)
 
 ```bash

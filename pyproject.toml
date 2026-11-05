@@ -26,7 +26,7 @@ warlord = "warlord.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-warlord = ["data/*.json"]
+warlord = ["data/*.json", "data/evals/*.jsonl", "data/evals/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

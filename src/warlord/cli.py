@@ -164,6 +164,28 @@ def cmd_mcp(args) -> int:
     return mcp_main(["--data", args.data] if args.data else [])
 
 
+def cmd_eval(args) -> int:
+    from warlord.evals import kit
+    from warlord.paths import data_dir, kb_dir
+
+    questions = kit.load_questions()
+    if args.kind:
+        questions = [q for q in questions if q["kind"] == args.kind]
+    if args.eval_cmd == "questions":
+        print(kit.questions_markdown(questions, with_answers=args.answers))
+    elif args.eval_cmd == "install":
+        print(f"Installed the eval game at {kit.install_game(data_dir(args.data))}")
+    elif args.eval_cmd == "template":
+        print(f"Wrote {kit.write_template(questions, Path(args.file))}")
+    elif args.eval_cmd == "score":
+        answers = [json.loads(line) for line in Path(args.file).read_text(encoding="utf-8").splitlines() if line.strip()]
+        files = sorted(kb_dir(data_dir(args.data)).glob("*.jsonl"))
+        kb = KnowledgeBase.from_paths(files) if files else None
+        report = kit.score(answers, questions, kb)
+        print(json.dumps(report, indent=2) if args.json else kit.score_markdown(report))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="warlord", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -243,6 +265,15 @@ def build_parser() -> argparse.ArgumentParser:
     m = sub.add_parser("mcp", help="run the MCP server over stdio")
     m.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
     m.set_defaults(func=cmd_mcp)
+
+    e = sub.add_parser("eval", help="manual eval kit: questions, answer template, scoring")
+    e.add_argument("eval_cmd", choices=["questions", "install", "template", "score"])
+    e.add_argument("file", nargs="?", default="answers.jsonl", help="answers file (template/score)")
+    e.add_argument("--kind", choices=["rules", "legality"])
+    e.add_argument("--answers", action="store_true", help="questions: include gold answers, for review")
+    e.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
+    e.add_argument("--json", action="store_true")
+    e.set_defaults(func=cmd_eval)
 
     r = sub.add_parser("import-rules", help="convert an official rules PDF to KB rule records")
     r.add_argument("pdf")
