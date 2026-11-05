@@ -88,3 +88,29 @@ def test_scored_and_unknown():
     s.players["a"].scored = [ScoredObjective(id="obj.corner_the_market")]
     p = progress(s, "obj.corner_the_market", "obj.not_real")
     assert p["obj.corner_the_market"]["status"] == "scored" and p["obj.not_real"]["status"] == "unknown"
+
+
+def test_secret_objectives_are_judged_for_the_asker_only():
+    from warlord.engine.objectives import SECRET_CHECKERS, secret_progress
+
+    k = KnowledgeBase()
+    k.add_many(KB.records.values())
+    for alias, oid, phase in [("faa", "so.forge_an_alliance", "status"), ("ctr", "so.control_the_region", "status"),
+                              ("dts", "so.darken_the_skies", "action"), ("hrm", "so.hoard_raw_materials", "status")]:
+        from warlord.kb.records import Timing
+
+        k.add(ComponentCard(id=oid, type="secret_objective", ruleset="base", name=oid, aliases=[alias],
+                            text="Win a combat in another player's home system." if alias == "dts" else "",
+                            timing=Timing(window="passive", phase=phase)))
+    k.finalize()
+    s = state()
+    s.players["a"].private.secret_objectives = ["so.forge_an_alliance", "so.control_the_region", "so.darken_the_skies",
+                                                "so.hoard_raw_materials"]
+    s.players["b"].private.secret_objectives = ["so.control_the_region"]
+    mine = {e["id"]: e for e in secret_progress(project(s, "a"), k, "a")}
+    assert mine["so.forge_an_alliance"]["status"] == "can_score"  # 4 cultural planets
+    assert mine["so.control_the_region"]["detail"].startswith("2 of 6")
+    assert mine["so.darken_the_skies"]["status"] == "event"
+    assert mine["so.hoard_raw_materials"]["detail"].startswith("11 of 12")  # 3+2+1+2+0+3
+    assert secret_progress(project(s, "a"), k, "b") is None  # never another player's secrets
+    assert len(SECRET_CHECKERS) == 26

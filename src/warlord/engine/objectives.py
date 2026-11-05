@@ -291,3 +291,177 @@ def objective_progress(view, kb, player: str, objective_ids=None) -> list[dict]:
         for e in out:
             e.setdefault("note", "home system not found; home-system counts may be off")
     return out
+
+
+# --------------------------------------------------------------- secret objectives
+#
+# Only the asking player's own secrets are judged: opponents' are hidden.
+# Secrets scored when something happens during play (winning a combat, being
+# the last to pass, an agenda electing you) are reported as "event" with what
+# triggers them.
+
+NEXUS_TILES = {"82a", "82b"}
+
+
+def _secret_checkers():
+    def ships_in(b, s):
+        return any(canonical(u) in SHIPS and n for u, n in s.space.get(b.player, {}).items())
+
+    def count_on_board(b, unit):
+        return sum(n for s in b.view.map for holder in [s.space.get(b.player, {})] + [p.units.get(b.player, {}) for p in s.planets.values()]
+                   for u, n in holder.items() if canonical(u) == unit)
+
+    def trait(b, name, need):
+        return _count(sum(1 for _, n, _ in b.planets if name in (b.stat(f"planet.{n.lower()}", "traits", []) or [])), need,
+                      f"{name} planets")
+
+    def planet_total(b, key, need):
+        return _count(sum(int(b.stat(f"planet.{n.lower()}", key, 0) or 0) for _, n, _ in b.planets), need, f"{key} on controlled planets")
+
+    def faction_techs(b):
+        return _count(sum(1 for t in b.me.techs if getattr(b.kb.get(t.id), "faction", None) if b.kb is not None), 2, "faction technologies")
+
+    def gatekeeper(b):
+        alpha = any(ships_in(b, s) and "alpha" in s.wormholes for s in b.view.map)
+        beta = any(ships_in(b, s) and "beta" in s.wormholes for s in b.view.map)
+        return alpha and beta, f"ships with an alpha wormhole: {'yes' if alpha else 'no'}, with a beta: {'yes' if beta else 'no'}"
+
+    def supply_lines(b):
+        hit = [s.position for s in b.view.map if ships_in(b, s) and any(
+            canonical(u) == "space_dock" and n for o, p in ((o, p) for p in s.planets.values() for o in p.units)
+            if o != b.player for u, n in p.units[o].items())]
+        return bool(hit), f"in {hit[0]}" if hit else "no ships with another player's space dock"
+
+    def nexus(b):
+        hit = any(b.has_units(s) and (s.tile in NEXUS_TILES or "mallice" in s.planets) for s in b.view.map)
+        return hit, "units in the wormhole nexus" if hit else "no units in the wormhole nexus"
+
+    def adjacent_anomaly(b):
+        anomalies = {s.position for s in b.view.map if s.anomaly}
+        n = sum(1 for s in b.view.map if ships_in(b, s) and b.adjacency.get(s.position, set()) & anomalies)
+        return _count(n, 3, "systems next to an anomaly with your ships")
+
+    def same_color(b):
+        best = max(b.tech_colors().values(), default=0)
+        return _count(best, 4, "technologies of one color")
+
+    def mechs(b):
+        return _count(sum(1 for s in b.view.map for p in s.planets.values() if p.units.get(b.player, {}).get("mech")), 4,
+                      "planets with your mech")
+
+    def seat(b):
+        for s in b.view.map:
+            if any(n.lower() in MECATOL for n in s.planets):
+                mine = any(p.controller == b.player for n, p in s.planets.items() if n.lower() in MECATOL)
+                ships = sum(n for u, n in s.space.get(b.player, {}).items() if canonical(u) in SHIPS)
+                return mine and ships >= 3, f"control Mecatol Rex: {'yes' if mine else 'no'}; {ships} ships there"
+        return False, "Mecatol Rex is not on the map"
+
+    def fringe(b):
+        best = 0
+        for s in b.view.map:
+            for p in s.planets.values():
+                units = p.units.get(b.player, {})
+                if not units.get("space_dock"):
+                    best = max(best, sum(n for u, n in units.items() if canonical(u) in ("infantry", "mech")))
+        return _count(best, 9, "ground forces on one planet without your space dock")
+
+    def production(b):
+        from warlord.engine.units import faction_unit_overrides, stats_for
+
+        overrides = faction_unit_overrides(b.kb, b.me.faction, b.me.unit_upgrades)
+        best = 0
+        for s in b.view.map:
+            total = 0
+            for where, units in [("space", s.space.get(b.player, {}))] + [(n, p.units.get(b.player, {})) for n, p in s.planets.items()]:
+                for u, n in units.items():
+                    st = stats_for(u, b.me.unit_upgrades, overrides)
+                    if st.production is not None:
+                        extra = int(b.stat(f"planet.{where.lower()}", "resources", 0) or 0) if st.production_plus_resources and where != "space" else 0
+                        total += (st.production + extra) * n
+            best = max(best, total)
+        return _count(best, 8, "PRODUCTION in one system")
+
+    def icon(b):
+        hit = [n for _, n, _ in b.planets if b.stat(f"planet.{n.lower()}", "legendary")]
+        return bool(hit), f"control {hit[0]}" if hit else "no legendary planet"
+
+    def bonds(b):
+        # A player can't play their own promissory notes (69.2), so any note in their play area is another player's.
+        return bool(b.me.promissory_in_play), f"{len(b.me.promissory_in_play)} promissory notes in your play area"
+
+    def claim(b):
+        for s, name, _ in b.planets:
+            if any(p.controller not in (None, b.player) for p in s.planets.values()):
+                return True, f"in {s.position}"
+        return False, "no shared system"
+
+    def threaten(b):
+        homes = {pos for pid, pos in b.home_positions.items() if pid != b.player and pos}
+        n = [s.position for s in b.view.map if ships_in(b, s) and b.adjacency.get(s.position, set()) & homes]
+        return bool(n), f"ships in {n[0]}" if n else "no ships next to another home system"
+
+    def cohesion(b):
+        others = set(b.view.players) - {b.player}
+        missing = others - b.neighbors()
+        return not missing, "neighbors with everyone" if not missing else f"not neighbors with {', '.join(sorted(missing))}"
+
+    def spy(b):
+        if b.view.viewer != b.player:
+            return False, "hand unknown"
+        return _count(len(b.view.hand.action_cards), 5, "action cards in hand to discard")
+
+    return {
+        "ans": faction_techs,
+        "btgk": gatekeeper,
+        "csl": supply_lines,
+        "ctr": lambda b: _count(sum(1 for s in b.view.map if ships_in(b, s)), 6, "systems with your ships"),
+        "dfat": nexus,
+        "dp": lambda b: _count(len(b.view.laws), 3, "laws in play"),
+        "eap": lambda b: _count(count_on_board(b, "pds"), 4, "PDS on the board"),
+        "eh": lambda b: planet_total(b, "influence", 12),
+        "faa": lambda b: trait(b, "cultural", 4),
+        "fc": cohesion,
+        "fsn": spy,
+        "fwm": lambda b: _count(count_on_board(b, "space_dock"), 3, "space docks on the board"),
+        "gamf": lambda b: _count(count_on_board(b, "dreadnought"), 5, "dreadnoughts on the board"),
+        "hrm": lambda b: planet_total(b, "resources", 12),
+        "lsc": adjacent_anomaly,
+        "mlp": same_color,
+        "mp": lambda b: trait(b, "industrial", 4),
+        "mrm": lambda b: trait(b, "hazardous", 4),
+        "mtm": mechs,
+        "ose": seat,
+        "otf": fringe,
+        "pem": production,
+        "sai": icon,
+        "sb": bonds,
+        "syc": claim,
+        "te": threaten,
+    }
+
+
+SECRET_CHECKERS = _secret_checkers()
+
+
+def secret_progress(view, kb, player: str) -> list[dict] | None:
+    """Progress on the asking player's own unscored secrets; None for anyone else's."""
+    if view.viewer != player or not view.hand.known:
+        return None
+    board = _Board(view, kb, player)
+    out = []
+    for oid in view.hand.secret_objectives:
+        rec = kb.get(oid) if kb is not None else None
+        aliases = list(getattr(rec, "aliases", []) or [])
+        alias = next((a for a in aliases if a in SECRET_CHECKERS), None)
+        phase = getattr(getattr(rec, "timing", None), "phase", None)
+        entry = {"id": oid, "name": getattr(rec, "name", oid), "phase": phase}
+        if alias is not None:
+            ok, detail = SECRET_CHECKERS[alias](board)
+            entry.update(status="can_score" if ok else "not_yet", detail=detail)
+        elif rec is not None and phase in ("action", "agenda"):
+            entry.update(status="event", detail=f"scored when it happens: {getattr(rec, 'text', '')[:140]}")
+        else:
+            entry.update(status="unknown", detail="this objective is not modelled")
+        out.append(entry)
+    return out

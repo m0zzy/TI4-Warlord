@@ -56,7 +56,7 @@ def evaluate_position(view, kb, player: str | None = None) -> dict:
         spend["note"] = "planet values unknown without the knowledge base"
 
     threats = _threats(view, kb, player)
-    from warlord.engine.objectives import objective_progress
+    from warlord.engine.objectives import objective_progress, secret_progress
 
     revealed = {o: [pid for pid, p in view.players.items() if o in p.scored] for o in view.objectives.public_revealed}
     progress = {e["id"]: e for e in objective_progress(view, kb, player)}
@@ -69,9 +69,10 @@ def evaluate_position(view, kb, player: str | None = None) -> dict:
             {**progress.get(o, {"id": o}), "scored_by": who} for o, who in revealed.items()
         ],
         "secret_objectives_in_hand": len(view.hand.secret_objectives) if view.viewer == player else None,
+        "secret_objectives": secret_progress(view, kb, player),
         "spending_power": spend,
         "threats": threats,
-        "not_assessed": ["secret objective progress", "agenda and law effects", "action cards in opponents' hands"],
+        "not_assessed": ["opponents' secret objectives", "agenda and law effects", "action cards in opponents' hands"],
     }
 
 
