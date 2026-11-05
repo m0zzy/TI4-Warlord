@@ -118,3 +118,36 @@ def test_lookups_and_combat(data):
 def test_missing_knowledge_base_is_explained(tmp_path):
     (err, msg), = run(tmp_path, [("rules_lookup", {"question": "anything"})])
     assert err and "warlord setup" in msg
+
+
+def test_check_ruling_flags_problems_then_resets(data):
+    illegal = {"type": "tactical", "player": "p3", "activate": "201", "moves": [{"from": "101", "units": {"cruiser": 1}}]}
+    results = run(data, [
+        ("open_game", {"game": "pbd00000", "seat": "p3"}),
+        ("check_ruling", {"answer": "No.", "citations": ["lrr.sample.movement", "lrr.89.2"], "claims_verified": True}),
+        ("rules_lookup", {"question": "move out of a system with my command token", "k": 3}),
+        ("validate_action", {"action": illegal}),
+        ("check_ruling", {"answer": "No: your cruiser is in a system you already activated, so it can't move.",
+                          "citations": ["lrr.sample.movement"], "claims_verified": True}),
+        ("check_ruling", {"answer": "No.", "citations": ["lrr.sample.movement"], "claims_verified": False}),
+    ])
+    first = results[1][1]
+    assert not first["ok"]
+    assert first["citations"] == {"backed": [], "not_looked_up": ["lrr.sample.movement"], "unknown": ["lrr.89.2"]}
+    assert any("claims to be verified" in p for p in first["problems"])
+    passed = results[4][1]
+    assert passed["ok"] and passed["label"] == "Engine-verified." and passed["session_record"]
+    after_reset = results[5][1]
+    assert after_reset["citations"]["not_looked_up"] == ["lrr.sample.movement"]  # record was reset
+
+
+def test_check_ruling_flags_long_quotes(data):
+    movement = json.loads((data / "kb" / "rules.sample.jsonl").read_text().splitlines()[6])["text"]
+    quoted = movement[movement.index("Ships cannot"):]
+    results = run(data, [
+        ("rules_lookup", {"question": "movement out of a system with a command token", "k": 3}),
+        ("check_ruling", {"answer": f"The rule says: {quoted}", "citations": ["lrr.sample.movement"]}),
+    ])
+    check = results[1][1]
+    assert not check["ok"] and check["long_quotes"] and "Paraphrase" in " ".join(check["problems"])
+    assert check["label"].startswith("Unverified:")

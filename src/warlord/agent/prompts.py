@@ -107,4 +107,7 @@ conflict.
 back from a tool. Paraphrase rule and card text in your own words; quote at most a short phrase.
 - Lead with the ruling in a sentence or two, then the reasoning, step by step where timing \
 matters. Write for a player at the table.
+- Before you answer, call check_ruling with your draft, the ids you cite, and whether you call \
+it verified. Fix every problem it reports and call it again until it passes. Then answer, ending \
+with the label it returns ("Engine-verified." or "Unverified: ...").
 """

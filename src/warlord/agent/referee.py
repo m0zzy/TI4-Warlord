@@ -20,6 +20,7 @@ from typing import Any
 from warlord.agent.prompts import REFEREE_OUTPUT_SCHEMA, REFEREE_SYSTEM
 from warlord.agent.quotes import MAX_QUOTE_WORDS, long_quotes, trim_quotes
 from warlord.tools.registry import REFEREE_TOOLS, ToolContext, run_tool, tool_definitions
+from warlord.tools.ruling_check import partition_citations, source_texts, verification_gaps
 
 DEFAULT_MODEL = "claude-opus-5-5"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -201,18 +202,8 @@ class Referee:
         except json.JSONDecodeError as e:
             raise RefereeError(f"Final answer was not valid JSON: {text[:200]!r}") from e
 
-    def _source_texts(self) -> list[str]:
-        texts = []
-        for rid in sorted(self.ctx.seen_ids):
-            rec = self.ctx.kb.get(rid)
-            for attr in ("text", "answer"):
-                value = getattr(rec, attr, None)
-                if isinstance(value, str):
-                    texts.append(value)
-        return texts
-
     def _long_quotes(self, draft: dict) -> list[str]:
-        sources = self._source_texts()
+        sources = source_texts(self.ctx)
         found = long_quotes(draft.get("answer", ""), sources)
         for c in draft.get("citations", []):
             found += long_quotes(c.get("supports", ""), sources)
@@ -231,23 +222,12 @@ class Referee:
                 removed += more
                 citations.append({**c, "supports": supports})
             draft = {**draft, "answer": answer, "citations": citations}
-        kept, dropped = [], []
-        for c in draft.get("citations", []):
-            cid = c.get("id", "")
-            (kept if cid in ctx.seen_ids else dropped).append(c)
+        backed, _, _ = partition_citations(ctx, [c.get("id", "") for c in draft.get("citations", [])])
+        kept = [c for c in draft.get("citations", []) if c.get("id", "") in backed]
+        dropped = [c for c in draft.get("citations", []) if c.get("id", "") not in backed]
 
-        reasons = []
+        reasons = verification_gaps(ctx, backed)
         model_verified = bool(draft.get("verified"))
-        engine_checked = any(
-            e["tool"] == "validate_action" and e["coverage"] == "engine" for e in ctx.coverage
-        )
-        text_only_steps = [e["tool"] for e in ctx.coverage if e["coverage"] == "text_only"]
-        if not kept:
-            reasons.append("no citation backed by a rules or card lookup")
-        if not engine_checked:
-            reasons.append("the engine did not check this; the answer comes from the rules text")
-        if text_only_steps:
-            reasons.append(f"text-only coverage in: {', '.join(sorted(set(text_only_steps)))}")
         verified = model_verified and not reasons
 
         reason = (draft.get("unverified_reason") or "").strip()

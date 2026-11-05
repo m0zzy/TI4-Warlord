@@ -39,7 +39,8 @@ INSTRUCTIONS = (
     "Rules referee tools for Twilight Imperium 4 (base, Prophecy of Kings, Thunder's Edge). "
     "Use the 'referee' prompt for how to rule. In short: open a game as the asking player, look up "
     "every rule and card you rely on, validate concrete moves with the engine and repeat its "
-    "status_line, use combat_sim for odds, and cite the record ids the tools return."
+    "status_line, use combat_sim for odds, cite the record ids the tools return, and run "
+    "check_ruling on your draft before answering."
 )
 
 
@@ -240,6 +241,22 @@ def build_server(session: Session) -> MCPServer:
             "combat_sim",
             {"attacker": attacker, "defender": defender, "trials": trials, "space_cannon": space_cannon, "afb": afb},
         )
+
+    # -------------------------------------------------------------- checks
+
+    @server.tool(
+        description=(
+            "Check your drafted ruling before showing it to the player. Pass the answer text, the record ids "
+            "you cite, and whether you call it verified. Returns problems to fix (citations not looked up or "
+            "unknown, an unsupported 'verified' claim, long verbatim quotes) and the label the engine supports "
+            "('Engine-verified.' or 'Unverified: ...'). Fix every problem, then show the player the answer with "
+            "that label. When the check passes, the session record resets for the next question."
+        )
+    )
+    def check_ruling(answer: str, citations: list[str], claims_verified: bool = False, final: bool = True) -> dict:
+        from warlord.tools.ruling_check import check_ruling as run_check
+
+        return run_check(session.context(), answer, citations, claims_verified, final=final)
 
     # -------------------------------------------------------------- prompts
 
