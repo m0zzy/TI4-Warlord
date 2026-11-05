@@ -294,7 +294,18 @@ def _strategic(c: _Checker, a: StrategicAction) -> None:
             "strategic_action",
             f"{a.player} has already resolved the primary ability of {a.card} this round.",
         )
-    c.skip(f"primary ability choices for {a.card}")
+    if c.violations:
+        return
+    from warlord.engine.strategy_cards import check_primary
+
+    for f in check_primary(c.view, c.kb, a):
+        if f.kind == "violation":
+            c.check(f"primary.{f.topic}", False, f.topic, f.message)
+        elif f.kind == "unchecked":
+            c.skip(f.message)
+        else:
+            c.warn(f.topic, f.message)
+    c.checked.append("primary_choices")
 
 
 def _component(c: _Checker, a: ComponentAction) -> None:
