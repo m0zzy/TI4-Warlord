@@ -85,11 +85,12 @@ def test_validate_action_status_line(data):
                                         "moves": [{"from": "101", "units": {"cruiser": 1}}]}}),
         ("validate_action", {"action": {"type": "tactical", "player": "p3", "activate": "201"}}),
         ("validate_action", {"action": {"type": "tactical", "player": "p3", "activate": "201",
-                                        "moves": [{"from": "102", "units": {"carrier": 1}}]}}),
+                                        "moves": [{"from": "102", "units": {"carrier": 1, "infantry": 1}}],
+                                        "invade": [{"planet": "quann", "infantry": 1}]}}),
     ])
     assert results[1][1]["status_line"].startswith("Illegal, engine-verified: Units cannot move out of 101")
     assert results[2][1]["status_line"] == "Legal, engine-verified."
-    assert results[3][1]["status_line"].startswith("Not verified by the engine. Unchecked: movement range")
+    assert results[3][1]["status_line"].startswith("Not verified by the engine. Unchecked: invasion")
 
 
 def test_set_my_hand_resolves_names(data):

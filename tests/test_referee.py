@@ -92,7 +92,8 @@ def test_unbacked_citations_dropped(ctx):
 
 
 def test_partial_coverage_unverified(ctx):
-    legal_ish = {"type": "tactical", "player": "p3", "activate": "201", "moves": [{"from": "102", "units": {"carrier": 1}}]}
+    legal_ish = {"type": "tactical", "player": "p3", "activate": "201", "moves": [{"from": "102", "units": {"carrier": 1}}],
+                 "produce": [{"where": "201", "units": {"fighter": 1}}]}
     client = FakeClient([
         turn(tool_use("t1", "rules_lookup", {"question": "movement"}),
              tool_use("t2", "validate_action", {"action": legal_ish})),

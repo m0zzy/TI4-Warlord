@@ -45,6 +45,11 @@ TOPICS = {
     "movement.units_present": "Movement: only units you have in the system can move",
     "strategic_action": "Strategic action: resolve the primary ability of an unexhausted strategy card you have",
     "timing.windows": "Timing: when and after abilities can only be resolved during their timing window",
+    "movement.range": "Movement: the number of systems a ship enters cannot exceed its move value; it cannot move through systems with other players' ships",
+    "movement.gravity_rift": "Gravity rift: a ship moving out of a gravity rift applies +1 to its move value and rolls a die",
+    "transport.capacity": "Transport: the number of units a ship transports cannot exceed its capacity value",
+    "capacity.excess": "Capacity: excess fighters and ground forces in a system's space area are removed",
+    "fleet_pool": "Fleet pool: maximum number of non-fighter ships a player can have in a system",
 }
 
 
@@ -66,12 +71,14 @@ class ValidationResult:
     checked: list[str] = field(default_factory=list)
     unchecked: list[str] = field(default_factory=list)
     schema_errors: list[str] = field(default_factory=list)
+    warnings: list[Violation] = field(default_factory=list)  # legal, but with a cost (units removed, dice to roll)
 
     def to_dict(self) -> dict:
         return {
             "legal": self.legal,
             "coverage": self.coverage,
             "violations": [v.to_dict() for v in self.violations],
+            "warnings": [w.to_dict() for w in self.warnings],
             "checked": self.checked,
             "unchecked": self.unchecked,
             **({"schema_errors": self.schema_errors} if self.schema_errors else {}),
@@ -86,10 +93,12 @@ def _no_refs(topic: str) -> list[str]:
 
 
 class _Checker:
-    def __init__(self, view: PerspectiveView, resolve: RefResolver):
+    def __init__(self, view: PerspectiveView, resolve: RefResolver, kb=None):
         self.view = view
         self.resolve = resolve
+        self.kb = kb
         self.violations: list[Violation] = []
+        self.warnings: list[Violation] = []
         self.checked: list[str] = []
         self.unchecked: list[str] = []
 
@@ -102,12 +111,18 @@ class _Checker:
     def skip(self, aspect: str) -> None:
         self.unchecked.append(aspect)
 
+    def warn(self, topic: str, message: str) -> None:
+        self.warnings.append(Violation(topic, message, self.resolve(topic)))
+
     def result(self) -> ValidationResult:
         if self.violations:
-            return ValidationResult(False, "engine", self.violations, self.checked, self.unchecked)
-        if self.unchecked:
-            return ValidationResult(None, "text_only", [], self.checked, self.unchecked)
-        return ValidationResult(True, "engine", [], self.checked, [])
+            r = ValidationResult(False, "engine", self.violations, self.checked, self.unchecked)
+        elif self.unchecked:
+            r = ValidationResult(None, "text_only", [], self.checked, self.unchecked)
+        else:
+            r = ValidationResult(True, "engine", [], self.checked, [])
+        r.warnings = self.warnings
+        return r
 
     # ------------------------------------------------------------- shared checks
 
@@ -213,10 +228,19 @@ def _tactical(c: _Checker, a: TacticalAction) -> None:
                 "movement.units_present",
                 f"{a.player} has {available} {unit} in {mv.from_} but tries to move {n}.",
             )
-    if a.moves:
-        c.skip("movement range and path (adjacency, wormholes, anomalies, blockades)")
-        c.skip("transport capacity for fighters and ground forces")
-        c.skip("fleet supply in the active system")
+    if a.moves and not c.violations:
+        from warlord.engine.movement import check_moves
+
+        for f in check_moves(view, a, c.kb):
+            if f.kind == "violation":
+                c.check(f"movement.{f.topic}", False, f.topic, f.message)
+            elif f.kind == "unchecked":
+                c.skip(f.message)
+            else:
+                c.warn(f.topic, f.message)
+        c.checked += ["movement_range_and_path", "transport_capacity", "capacity_and_fleet_pool_after_movement"]
+    elif a.moves:
+        c.skip("movement range and transport (not checked because of the violations above)")
     if a.invade:
         c.skip("invasion (bombardment, space cannon defense, ground combat, planetary shields)")
     if a.produce:
@@ -319,7 +343,7 @@ _HANDLERS = {
 
 
 def validate_action(
-    view: PerspectiveView, action: dict, resolve_refs: RefResolver = _no_refs
+    view: PerspectiveView, action: dict, resolve_refs: RefResolver = _no_refs, kb=None
 ) -> ValidationResult:
     try:
         parsed = parse_action(action)
@@ -327,7 +351,7 @@ def validate_action(
         errs = [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()]
         return ValidationResult(None, "text_only", schema_errors=errs,
                                 unchecked=["the action is malformed; fix the schema errors first"])
-    c = _Checker(view, resolve_refs)
+    c = _Checker(view, resolve_refs, kb)
     if c.player_exists(parsed.player):
         _HANDLERS[type(parsed)](c, parsed)  # type: ignore[operator]
     return c.result()

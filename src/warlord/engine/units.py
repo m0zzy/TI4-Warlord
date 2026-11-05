@@ -25,6 +25,10 @@ class UnitStats:
     cost: float = 0.0
     is_ship: bool = False
     is_ground: bool = False
+    move: int = 0
+    capacity: int = 0
+    independent: bool = False  # a fighter that may move without being transported (Fighter II)
+    is_structure: bool = False
 
     def with_(self, **kw) -> "UnitStats":
         return replace(self, **kw)
@@ -32,24 +36,30 @@ class UnitStats:
 
 _I = {
     "fighter": UnitStats("fighter", combat=9, cost=0.5, is_ship=True),
-    "destroyer": UnitStats("destroyer", combat=9, afb=9, afb_dice=2, cost=1, is_ship=True),
-    "cruiser": UnitStats("cruiser", combat=7, cost=2, is_ship=True),
-    "carrier": UnitStats("carrier", combat=9, cost=3, is_ship=True),
-    "dreadnought": UnitStats("dreadnought", combat=5, bombard=5, bombard_dice=1, sustain=True, cost=4, is_ship=True),
-    "war_sun": UnitStats("war_sun", combat=3, combat_dice=3, bombard=3, bombard_dice=3, sustain=True, cost=12, is_ship=True),
-    "flagship": UnitStats("flagship", combat=7, combat_dice=2, sustain=True, cost=8, is_ship=True),
+    "destroyer": UnitStats("destroyer", combat=9, afb=9, afb_dice=2, cost=1, is_ship=True, move=2),
+    "cruiser": UnitStats("cruiser", combat=7, cost=2, is_ship=True, move=2),
+    "carrier": UnitStats("carrier", combat=9, cost=3, is_ship=True, move=1, capacity=4),
+    "dreadnought": UnitStats(
+        "dreadnought", combat=5, bombard=5, bombard_dice=1, sustain=True, cost=4, is_ship=True, move=1, capacity=1
+    ),
+    "war_sun": UnitStats(
+        "war_sun", combat=3, combat_dice=3, bombard=3, bombard_dice=3, sustain=True, cost=12, is_ship=True,
+        move=2, capacity=6,
+    ),
+    # Generic stand-in; real flagships differ by faction (see faction_unit_overrides).
+    "flagship": UnitStats("flagship", combat=7, combat_dice=2, sustain=True, cost=8, is_ship=True, move=1, capacity=3),
     "infantry": UnitStats("infantry", combat=8, cost=0.5, is_ground=True),
     "mech": UnitStats("mech", combat=6, sustain=True, cost=2, is_ground=True),
-    "pds": UnitStats("pds", space_cannon=6, space_cannon_dice=1),
-    "space_dock": UnitStats("space_dock"),
+    "pds": UnitStats("pds", space_cannon=6, space_cannon_dice=1, is_structure=True),
+    "space_dock": UnitStats("space_dock", is_structure=True),
 }
 
 _II = {
-    "fighter": _I["fighter"].with_(combat=8),
+    "fighter": _I["fighter"].with_(combat=8, move=2, independent=True),
     "destroyer": _I["destroyer"].with_(combat=8, afb=6, afb_dice=3),
-    "cruiser": _I["cruiser"].with_(combat=6),
-    "carrier": _I["carrier"],
-    "dreadnought": _I["dreadnought"],
+    "cruiser": _I["cruiser"].with_(combat=6, move=3, capacity=1),
+    "carrier": _I["carrier"].with_(move=2, capacity=6),
+    "dreadnought": _I["dreadnought"].with_(move=2),
     "infantry": _I["infantry"].with_(combat=7),
     "pds": _I["pds"].with_(space_cannon=5),
 }
@@ -74,13 +84,54 @@ def stats_for(
 ) -> UnitStats:
     """Stats for ``unit`` given a player's ``unit_upgrades`` (e.g. ["carrier_2"])."""
     u = canonical(unit)
-    upgraded = any(_upgrade_target(x) == u for x in (upgrades or []))
+    upgraded = any((t := _upgrade_target(x)) == u or (t or "").endswith("_" + u) for x in (upgrades or []))
     base = (_II if upgraded else _I).get(u) or _I.get(u)
     if base is None:
         base = UnitStats(u)
     if overrides and u in overrides:
         base = base.with_(**overrides[u])
     return base
+
+
+_KB_STAT_FIELDS = {
+    "combat": "combat",
+    "combat_dice": "combat_dice",
+    "afb": "afb",
+    "afb_dice": "afb_dice",
+    "bombard": "bombard",
+    "bombard_dice": "bombard_dice",
+    "space_cannon": "space_cannon",
+    "space_cannon_dice": "space_cannon_dice",
+    "sustain_damage": "sustain",
+    "cost": "cost",
+    "move": "move",
+    "capacity": "capacity",
+}
+
+
+def faction_unit_overrides(kb, faction: str | None, upgrades: list[str] | None = None) -> dict[str, dict]:
+    """Stat overrides for a faction's own units (flagship, mech, special ships),
+    from the knowledge base's faction and unit records."""
+    if kb is None or not faction:
+        return {}
+    rec = kb.get(f"faction.{faction}")
+    unit_ids = (getattr(rec, "stats", {}) or {}).get("units") or []
+    out: dict[str, dict] = {}
+    for uid in unit_ids:
+        unit = kb.get(f"unit.{uid}")
+        stats = getattr(unit, "stats", None) or {}
+        base = canonical(str(stats.get("base_type") or ""))
+        if not base or base not in _I:
+            continue
+        if any(_upgrade_target(x) in (base, canonical(uid)) for x in upgrades or []) and stats.get("upgrades_to"):
+            upgraded = kb.get(f"unit.{stats['upgrades_to']}")
+            stats = getattr(upgraded, "stats", None) or stats
+        fields = {ours: stats[theirs] for theirs, ours in _KB_STAT_FIELDS.items() if theirs in stats}
+        if base == "fighter" and fields.get("move"):
+            fields["independent"] = True
+        if fields:
+            out[base] = fields
+    return out
 
 
 def _upgrade_target(upgrade: str) -> str | None:

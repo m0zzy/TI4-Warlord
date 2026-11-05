@@ -106,7 +106,7 @@ The `Referee` code and its tests stay in the repo so this mode is ready to switc
 | M1 ✅ | `warlord setup` + data folder | One command builds the knowledge base from your files and reports counts | The LRR PDF, TE rulebook and AsyncTI4 checkout on your machine |
 | M2 ✅ | MCP server (stdio) with today's tools, `open_game`, `set_my_hand`, `status_line` | Claude Code and Claude Desktop can open a game and get a cited, engine-checked ruling | Try it in your own client |
 | M3 ✅ | `check_ruling` + `referee` prompt | The checks from `Referee.enforce` run over MCP; tests cover each check | — |
-| M4 | Movement range, capacity, fleet supply in the engine | Common tactical actions come back engine-verified instead of unverified | — |
+| M4 ✅ | Movement range, capacity, fleet supply in the engine | Common tactical actions come back engine-verified instead of unverified | — |
 | M5 | Manual eval kit | Question set (start with 50 from set A) + transcript scorer | Review and approve the questions |
 | M6 | Advisor tools (`legal_actions`, `apply_action`, `evaluate_position`) + `advisor` prompt | Advice validated by the engine before it is given | Review sample advice |
 | Later | API-key mode | See above | API key, hosting choice |

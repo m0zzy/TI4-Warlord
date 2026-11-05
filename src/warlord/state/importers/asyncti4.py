@@ -168,6 +168,24 @@ def _system(position: str, tile: str, index: AliasIndex) -> SystemState:
     )
 
 
+_WORMHOLE_TYPES = ("alpha", "beta", "gamma", "delta", "epsilon", "eta", "zeta", "iota", "kappa", "theta")
+
+
+def wormhole_from_token(token_id: str) -> str | None:
+    """Wormhole tokens placed during play: "creussalpha" -> "alpha", "gamma" -> "gamma"."""
+    t = token_id.lower().removeprefix("token_").removesuffix(".png")
+    for w in _WORMHOLE_TYPES:
+        if t == w or t.endswith(w) or t.startswith(f"{w}_") or t == f"wormhole{w}":
+            return w
+    return None
+
+
+def _add_wormhole(system: SystemState, token_id: str) -> None:
+    w = wormhole_from_token(token_id)
+    if w and w not in system.wormholes:
+        system.wormholes.append(w)
+
+
 def _upgrades(units_owned: Iterable[str]) -> list[str]:
     out = []
     for u in units_owned:
@@ -330,6 +348,9 @@ def from_web_data(data: dict, kb: KnowledgeBase | None = None, ruleset: Ruleset 
         sysm.command_tokens = [f for f in tud.get("ccs") or [] if f]
         for owner, ents in (tud.get("space") or {}).items():
             _add_entities(sysm.space, sysm.damaged, owner, ents)
+            for e in ents:
+                if e.get("entityType") == "token":
+                    _add_wormhole(sysm, str(e.get("entityId") or ""))
         for pname, pdata in (tud.get("planets") or {}).items():
             planet = PlanetState(
                 controller=pdata.get("controlledBy") or None,
@@ -636,6 +657,8 @@ def from_save(
                 if hurt and holder == "space":
                     sysm.damaged.setdefault(owner, {})[name] = sysm.damaged.get(owner, {}).get(name, 0) + hurt
                 continue
+            if line.startswith("token_"):
+                _add_wormhole(sysm, line.strip())
             t = _TOKEN.match(line.strip())
             if t:
                 kind, code = t.groups()
