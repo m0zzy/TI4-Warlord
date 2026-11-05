@@ -50,6 +50,10 @@ TOPICS = {
     "transport.capacity": "Transport: the number of units a ship transports cannot exceed its capacity value",
     "capacity.excess": "Capacity: excess fighters and ground forces in a system's space area are removed",
     "fleet_pool": "Fleet pool: maximum number of non-fighter ships a player can have in a system",
+    "invasion": "Invasion: commit ground forces from the space area of the active system to land on its planets",
+    "production": "Production: the number of units produced cannot exceed the combined production value; ships cannot be produced in a system with other players' ships",
+    "production.cost": "Producing units: spend resources equal to or greater than the cost of the units produced",
+    "production.reinforcements": "Producing units: a player is limited by the units in their reinforcements",
 }
 
 
@@ -241,10 +245,24 @@ def _tactical(c: _Checker, a: TacticalAction) -> None:
         c.checked += ["movement_range_and_path", "transport_capacity", "capacity_and_fleet_pool_after_movement"]
     elif a.moves:
         c.skip("movement range and transport (not checked because of the violations above)")
-    if a.invade:
-        c.skip("invasion (bombardment, space cannon defense, ground combat, planetary shields)")
-    if a.produce:
-        c.skip("production (producing units, production limit, cost, reinforcements)")
+    if (a.invade or a.produce) and not c.violations:
+        from warlord.engine.invasion_production import check_invasion, check_production
+        from warlord.engine.movement import MovementContext
+
+        mc = MovementContext.build(view, a.player, c.kb)
+        for f in check_invasion(view, a, c.kb, mc) + check_production(view, a, c.kb, mc):
+            if f.kind == "violation":
+                c.check(f"{f.topic}.rule", False, f.topic, f.message)
+            elif f.kind == "unchecked":
+                c.skip(f.message)
+            else:
+                c.warn(f.topic, f.message)
+        if a.invade:
+            c.checked.append("invasion_commit")  # the results (space cannon defense, ground combat) are dice, not legality
+        if a.produce:
+            c.checked += ["production_limit", "production_cost", "production_placement"]
+    elif a.invade or a.produce:
+        c.skip("invasion and production (not checked because of the violations above)")
 
 
 def _pass(c: _Checker, a: Pass) -> None:

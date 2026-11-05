@@ -29,6 +29,9 @@ class UnitStats:
     capacity: int = 0
     independent: bool = False  # a fighter that may move without being transported (Fighter II)
     is_structure: bool = False
+    production: int | None = None  # PRODUCTION value
+    production_plus_resources: bool = False  # space docks: value + the planet's resources
+    fighter_capacity: int = 0  # capacity for fighters only (space docks: 3)
 
     def with_(self, **kw) -> "UnitStats":
         return replace(self, **kw)
@@ -51,7 +54,7 @@ _I = {
     "infantry": UnitStats("infantry", combat=8, cost=0.5, is_ground=True),
     "mech": UnitStats("mech", combat=6, sustain=True, cost=2, is_ground=True),
     "pds": UnitStats("pds", space_cannon=6, space_cannon_dice=1, is_structure=True),
-    "space_dock": UnitStats("space_dock", is_structure=True),
+    "space_dock": UnitStats("space_dock", is_structure=True, production=2, production_plus_resources=True, fighter_capacity=3),
 }
 
 _II = {
@@ -62,6 +65,7 @@ _II = {
     "dreadnought": _I["dreadnought"].with_(move=2),
     "infantry": _I["infantry"].with_(combat=7),
     "pds": _I["pds"].with_(space_cannon=5),
+    "space_dock": _I["space_dock"].with_(production=4),
 }
 
 ALIASES = {"warsun": "war_sun", "dread": "dreadnought", "dn": "dreadnought", "dd": "destroyer",
@@ -127,6 +131,12 @@ def faction_unit_overrides(kb, faction: str | None, upgrades: list[str] | None =
             upgraded = kb.get(f"unit.{stats['upgrades_to']}")
             stats = getattr(upgraded, "stats", None) or stats
         fields = {ours: stats[theirs] for theirs, ours in _KB_STAT_FIELDS.items() if theirs in stats}
+        if "production" in stats:
+            value = str(stats["production"]).strip()
+            if value.startswith("+") and value[1:].isdigit():
+                fields.update(production=int(value[1:]), production_plus_resources=True)
+            elif value.isdigit():
+                fields.update(production=int(value), production_plus_resources=False)
         if base == "fighter" and fields.get("move"):
             fields["independent"] = True
         if fields:

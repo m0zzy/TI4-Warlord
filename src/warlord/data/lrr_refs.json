@@ -44,5 +44,19 @@
   "fleet_pool": [
     "lrr.37.1",
     "lrr.37.3"
+  ],
+  "invasion": [
+    "lrr.49.2"
+  ],
+  "production": [
+    "lrr.68.1",
+    "lrr.67.6"
+  ],
+  "production.cost": [
+    "lrr.67.1",
+    "lrr.67.2"
+  ],
+  "production.reinforcements": [
+    "lrr.67.5"
   ]
 }

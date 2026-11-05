@@ -189,6 +189,9 @@ def _add_wormhole(system: SystemState, token_id: str) -> None:
 def _upgrades(units_owned: Iterable[str]) -> list[str]:
     out = []
     for u in units_owned:
+        if u == "warsun":
+            out.append("war_sun")  # the War Sun technology: war suns can now be produced
+            continue
         m = re.fullmatch(r"([a-z_]+?)2", u)
         if m:
             out.append(f"{m.group(1)}_2")
