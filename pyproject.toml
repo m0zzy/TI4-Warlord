@@ -10,17 +10,23 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "pydantic>=2.6",
-  "anthropic>=0.80",
+  "mcp>=2.3",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+pdf = ["pdfminer.six>=20231228"]
+# API-key mode (built-in referee, automated evals). Not needed for the MCP server.
+api = ["anthropic>=0.80"]
 
 [project.scripts]
 warlord = "warlord.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+warlord = ["data/*.json", "data/evals/*.jsonl", "data/evals/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -49,6 +49,7 @@ def project(state: GameState, viewer: str) -> PerspectiveView:
             action_cards=list(me.private.action_cards),
             promissory_notes=list(me.private.promissory_notes),
             secret_objectives=list(me.private.secret_objectives),
+            known=me.private.known,
         ),
         ruleset=state.ruleset.model_copy(),
         meta=state.meta.model_copy(),
@@ -59,7 +60,9 @@ def project(state: GameState, viewer: str) -> PerspectiveView:
         },
         objectives=ObjectivesView(
             public_revealed=list(state.objectives.public_revealed),
-            public_unrevealed=len(state.objectives.public_unrevealed),
+            public_unrevealed=(
+                len(state.objectives.public_unrevealed) if state.objectives.unrevealed_known else None
+            ),
         ),
         laws=[law.model_copy() for law in state.laws],
         discards=state.discards.model_copy(deep=True),

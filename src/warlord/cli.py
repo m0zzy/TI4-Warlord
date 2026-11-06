@@ -27,7 +27,19 @@ def _kb(paths: list[str] | None) -> KnowledgeBase:
 
 def _ctx(args) -> ToolContext:
     store = GameStore(args.games) if args.game else None
-    return ToolContext(kb=_kb(args.kb), store=store, game_id=args.game, viewer=args.viewer)
+    from warlord.ruleset import V1_RULESETS
+
+    from warlord.engine.validate import load_ref_overrides
+    from warlord.paths import LRR_REFS
+
+    return ToolContext(
+        kb=_kb(args.kb),
+        store=store,
+        game_id=args.game,
+        viewer=args.viewer,
+        default_ruleset=V1_RULESETS[args.ruleset],
+        ref_overrides=load_ref_overrides(LRR_REFS),
+    )
 
 
 def cmd_ask(args) -> int:
@@ -67,8 +79,119 @@ def cmd_import(args) -> int:
     from warlord.kb.importers.asyncti4 import import_checkout, write_jsonl
 
     report = import_checkout(args.data_dir, include=args.include)
-    path = write_jsonl(report.records, args.out)
+    path = write_jsonl([*report.records, *report.decks], args.out)
     print(json.dumps({**report.summary(), "written": str(path)}, indent=2))
+    return 0
+
+
+def _page_list(spec: str | None) -> list[int] | None:
+    """Turn "3,5-12,15" (1-based, as PDF viewers number pages) into zero-based indexes."""
+    if not spec:
+        return None
+    pages: list[int] = []
+    for part in spec.split(","):
+        lo, _, hi = part.strip().partition("-")
+        pages.extend(range(int(lo) - 1, int(hi or lo)))
+    return pages
+
+
+def cmd_import_rules(args) -> int:
+    from warlord.kb.importers.asyncti4 import write_jsonl
+    from warlord.kb.importers.rules_pdf import import_pdf
+
+    chunks = import_pdf(args.pdf, kind=args.kind, ruleset=args.ruleset, pages=_page_list(args.pages))
+    path = write_jsonl(chunks, args.out)  # type: ignore[arg-type]
+    topics = sum(1 for c in chunks if c.parent is None)
+    print(json.dumps({"chunks": len(chunks), "top_level": topics, "written": str(path)}, indent=2))
+    return 0
+
+
+def cmd_fetch(args) -> int:
+    from warlord.state.importers.fetch import fetch_completed, fetch_live
+
+    kb = _kb(args.kb)
+    store = GameStore(args.games)
+    if args.source == "live":
+        if not args.name:
+            print("give the game name, e.g. pbd12345", file=sys.stderr)
+            return 2
+        result = fetch_live(args.name, kb)
+        store.save(result.state)
+        results = [result]
+    else:
+        results = fetch_completed(args.count, store, kb)
+    print(json.dumps([
+        {"game": r.state.meta.game_id, "players": sorted(r.state.players), "unmapped": r.unmapped, "notes": r.notes}
+        for r in results
+    ], indent=2))
+    return 0
+
+
+def cmd_set_hand(args) -> int:
+    from warlord.state.importers.asyncti4 import set_hand
+
+    store = GameStore(args.games)
+    state = store.load(args.game)
+    split = lambda v: [x for x in (v or "").split(",") if x]  # noqa: E731
+    set_hand(state, args.viewer, split(args.action_cards), split(args.promissory_notes), split(args.secret_objectives))
+    store.save(state)
+    print(f"Saved {args.viewer}'s hand in {args.game}.")
+    return 0
+
+
+def cmd_setup(args) -> int:
+    from warlord.paths import data_dir
+    from warlord.setup import SetupError, run_setup, summary_json
+
+    try:
+        report = run_setup(
+            data_dir(args.data),
+            lrr=args.lrr,
+            te_rulebook=args.te_rulebook,
+            asyncti4=args.asyncti4,
+            download=not args.no_download,
+        )
+    except SetupError as e:
+        print(f"setup failed: {e}", file=sys.stderr)
+        return 2
+    print(summary_json(report))
+    return 0 if report.ok else 1
+
+
+def cmd_mcp(args) -> int:
+    from warlord.mcp_server import main as mcp_main
+
+    return mcp_main(["--data", args.data] if args.data else [])
+
+
+def cmd_eval(args) -> int:
+    from warlord.evals import kit
+    from warlord.paths import data_dir, kb_dir
+
+    questions = kit.load_questions()
+    if args.kind:
+        questions = [q for q in questions if q["kind"] == args.kind]
+    if args.eval_cmd == "questions":
+        print(kit.questions_markdown(questions, with_answers=args.answers))
+    elif args.eval_cmd == "install":
+        print(f"Installed the eval game at {kit.install_game(data_dir(args.data))}")
+    elif args.eval_cmd == "template":
+        print(f"Wrote {kit.write_template(questions, Path(args.file))}")
+    elif args.eval_cmd == "score":
+        answers = [json.loads(line) for line in Path(args.file).read_text(encoding="utf-8").splitlines() if line.strip()]
+        files = sorted(kb_dir(data_dir(args.data)).glob("*.jsonl"))
+        kb = KnowledgeBase.from_paths(files) if files else None
+        report = kit.score(answers, questions, kb)
+        print(json.dumps(report, indent=2) if args.json else kit.score_markdown(report))
+    return 0
+
+
+def cmd_datasets(args) -> int:
+    from warlord.datasets.generate import write_set_b
+
+    store = GameStore(args.games)
+    states = [store.load(g) for g in store.list_games()]
+    print(json.dumps(write_set_b(states, _kb(args.kb), args.out, per_seat=args.per_seat, seed=args.seed), indent=2))
     return 0
 
 
@@ -81,6 +204,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--viewer", required=required, help="asking player's seat, e.g. p3")
         sp.add_argument("--games", default=_default("data/private/games", "data/sample/games"))
         sp.add_argument("--kb", action="append", help="knowledge base dir or .jsonl (repeatable)")
+        sp.add_argument("--ruleset", default="thunders_edge", choices=["pok", "thunders_edge"],
+                        help="content to assume when no game is attached")
 
     a = sub.add_parser("ask", help="ask the referee a question")
     a.add_argument("question")
@@ -115,8 +240,66 @@ def build_parser() -> argparse.ArgumentParser:
     i = sub.add_parser("import-asyncti4", help="convert AsyncTI4 component JSON to KB records")
     i.add_argument("data_dir", help="path to TI4_map_generator_bot/src/main/resources/data")
     i.add_argument("--out", default="data/private/kb/components.asyncti4.jsonl")
-    i.add_argument("--include", nargs="+", default=["base", "pok"])
+    i.add_argument("--include", nargs="+", default=["base", "pok", "codex", "thunders_edge"])
     i.set_defaults(func=cmd_import)
+
+    f = sub.add_parser("fetch-asyncti4", help="import games from AsyncTI4's public API")
+    f.add_argument("source", choices=["live", "completed"])
+    f.add_argument("name", nargs="?", help="game name, for live")
+    f.add_argument("--count", type=int, default=10, help="completed games to import (50 in total at most)")
+    f.add_argument("--games", default="data/private/games")
+    f.add_argument("--kb", action="append")
+    f.set_defaults(func=cmd_fetch)
+
+    h = sub.add_parser("set-hand", help="enter your own hidden cards for a public-data game")
+    game_args(h, required=True)
+    h.add_argument("--action-cards", help="comma-separated ids, e.g. ac.sabotage,ac.direct_hit")
+    h.add_argument("--promissory-notes")
+    h.add_argument("--secret-objectives")
+    h.set_defaults(func=cmd_set_hand)
+
+    su = sub.add_parser(
+        "setup",
+        help="download the rules and card data and build the knowledge base",
+        description="With no options, downloads the official rules PDFs from FFG and the AsyncTI4 card data, "
+        "then builds and checks the knowledge base. Pass paths to use files you already have.",
+    )
+    su.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
+    su.add_argument("--lrr", help="Living Rules Reference PDF")
+    su.add_argument("--te-rulebook", help="Thunder's Edge rulebook PDF")
+    su.add_argument("--asyncti4", help="AsyncTI4 bot checkout, or its src/main/resources/data folder")
+    su.add_argument("--no-download", action="store_true", help="use only the files you pass; download nothing")
+    su.set_defaults(func=cmd_setup)
+
+    m = sub.add_parser("mcp", help="run the MCP server over stdio")
+    m.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
+    m.set_defaults(func=cmd_mcp)
+
+    e = sub.add_parser("eval", help="manual eval kit: questions, answer template, scoring")
+    e.add_argument("eval_cmd", choices=["questions", "install", "template", "score"])
+    e.add_argument("file", nargs="?", default="answers.jsonl", help="answers file (template/score)")
+    e.add_argument("--kind", choices=["rules", "legality"])
+    e.add_argument("--answers", action="store_true", help="questions: include gold answers, for review")
+    e.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
+    e.add_argument("--json", action="store_true")
+    e.set_defaults(func=cmd_eval)
+
+    ds = sub.add_parser("datasets", help="generate example datasets from stored games")
+    ds.add_argument("which", choices=["legality"], help="legality: set B, engine-decided legality cases")
+    ds.add_argument("--games", default=_default("data/private/games", "data/sample/games"))
+    ds.add_argument("--kb", action="append")
+    ds.add_argument("--out", default="data/private/datasets")
+    ds.add_argument("--per-seat", type=int, default=20)
+    ds.add_argument("--seed", type=int, default=0)
+    ds.set_defaults(func=cmd_datasets)
+
+    r = sub.add_parser("import-rules", help="convert an official rules PDF to KB rule records")
+    r.add_argument("pdf")
+    r.add_argument("--kind", choices=["lrr", "rulebook"], default="lrr")
+    r.add_argument("--ruleset", choices=["base", "pok", "codex", "thunders_edge"], help="ruleset tag for the chunks")
+    r.add_argument("--pages", help='pages to read, 1-based, e.g. "4,6-13,16"')
+    r.add_argument("--out", default="data/private/kb/lrr.jsonl")
+    r.set_defaults(func=cmd_import_rules)
     return p
 
 

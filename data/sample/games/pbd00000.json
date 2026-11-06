@@ -37,7 +37,7 @@
     "p3": {"faction": "hacan", "vp": 4,
            "command_tokens": {"tactic": 2, "fleet": 3, "strategy": 2},
            "trade_goods": 5, "commodities": {"current": 0, "max": 6},
-           "techs": [{"id": "gravity_drive"}], "unit_upgrades": ["carrier_2"],
+           "techs": [{"id": "tech.gravity_drive"}], "unit_upgrades": ["carrier_2"],
            "strategy_cards": [{"id": "trade", "primary_used": false}],
            "private": {"action_cards": ["ac.sabotage"], "promissory_notes": ["pn.hacan.trade_agreement"], "secret_objectives": ["so.control_the_region"]},
            "scored": [{"id": "obj.expand_borders"}]}

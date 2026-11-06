@@ -45,6 +45,15 @@ TOPICS = {
     "movement.units_present": "Movement: only units you have in the system can move",
     "strategic_action": "Strategic action: resolve the primary ability of an unexhausted strategy card you have",
     "timing.windows": "Timing: when and after abilities can only be resolved during their timing window",
+    "movement.range": "Movement: the number of systems a ship enters cannot exceed its move value; it cannot move through systems with other players' ships",
+    "movement.gravity_rift": "Gravity rift: a ship moving out of a gravity rift applies +1 to its move value and rolls a die",
+    "transport.capacity": "Transport: the number of units a ship transports cannot exceed its capacity value",
+    "capacity.excess": "Capacity: excess fighters and ground forces in a system's space area are removed",
+    "fleet_pool": "Fleet pool: maximum number of non-fighter ships a player can have in a system",
+    "invasion": "Invasion: commit ground forces from the space area of the active system to land on its planets",
+    "production": "Production: the number of units produced cannot exceed the combined production value; ships cannot be produced in a system with other players' ships",
+    "production.cost": "Producing units: spend resources equal to or greater than the cost of the units produced",
+    "production.reinforcements": "Producing units: a player is limited by the units in their reinforcements",
 }
 
 
@@ -66,12 +75,14 @@ class ValidationResult:
     checked: list[str] = field(default_factory=list)
     unchecked: list[str] = field(default_factory=list)
     schema_errors: list[str] = field(default_factory=list)
+    warnings: list[Violation] = field(default_factory=list)  # legal, but with a cost (units removed, dice to roll)
 
     def to_dict(self) -> dict:
         return {
             "legal": self.legal,
             "coverage": self.coverage,
             "violations": [v.to_dict() for v in self.violations],
+            "warnings": [w.to_dict() for w in self.warnings],
             "checked": self.checked,
             "unchecked": self.unchecked,
             **({"schema_errors": self.schema_errors} if self.schema_errors else {}),
@@ -86,10 +97,12 @@ def _no_refs(topic: str) -> list[str]:
 
 
 class _Checker:
-    def __init__(self, view: PerspectiveView, resolve: RefResolver):
+    def __init__(self, view: PerspectiveView, resolve: RefResolver, kb=None):
         self.view = view
         self.resolve = resolve
+        self.kb = kb
         self.violations: list[Violation] = []
+        self.warnings: list[Violation] = []
         self.checked: list[str] = []
         self.unchecked: list[str] = []
 
@@ -102,12 +115,18 @@ class _Checker:
     def skip(self, aspect: str) -> None:
         self.unchecked.append(aspect)
 
+    def warn(self, topic: str, message: str) -> None:
+        self.warnings.append(Violation(topic, message, self.resolve(topic)))
+
     def result(self) -> ValidationResult:
         if self.violations:
-            return ValidationResult(False, "engine", self.violations, self.checked, self.unchecked)
-        if self.unchecked:
-            return ValidationResult(None, "text_only", [], self.checked, self.unchecked)
-        return ValidationResult(True, "engine", [], self.checked, [])
+            r = ValidationResult(False, "engine", self.violations, self.checked, self.unchecked)
+        elif self.unchecked:
+            r = ValidationResult(None, "text_only", [], self.checked, self.unchecked)
+        else:
+            r = ValidationResult(True, "engine", [], self.checked, [])
+        r.warnings = self.warnings
+        return r
 
     # ------------------------------------------------------------- shared checks
 
@@ -213,14 +232,37 @@ def _tactical(c: _Checker, a: TacticalAction) -> None:
                 "movement.units_present",
                 f"{a.player} has {available} {unit} in {mv.from_} but tries to move {n}.",
             )
-    if a.moves:
-        c.skip("movement range and path (adjacency, wormholes, anomalies, blockades)")
-        c.skip("transport capacity for fighters and ground forces")
-        c.skip("fleet supply in the active system")
-    if a.invade:
-        c.skip("invasion (bombardment, space cannon defense, ground combat, planetary shields)")
-    if a.produce:
-        c.skip("production (producing units, production limit, cost, reinforcements)")
+    if a.moves and not c.violations:
+        from warlord.engine.movement import check_moves
+
+        for f in check_moves(view, a, c.kb):
+            if f.kind == "violation":
+                c.check(f"movement.{f.topic}", False, f.topic, f.message)
+            elif f.kind == "unchecked":
+                c.skip(f.message)
+            else:
+                c.warn(f.topic, f.message)
+        c.checked += ["movement_range_and_path", "transport_capacity", "capacity_and_fleet_pool_after_movement"]
+    elif a.moves:
+        c.skip("movement range and transport (not checked because of the violations above)")
+    if (a.invade or a.produce) and not c.violations:
+        from warlord.engine.invasion_production import check_invasion, check_production
+        from warlord.engine.movement import MovementContext
+
+        mc = MovementContext.build(view, a.player, c.kb)
+        for f in check_invasion(view, a, c.kb, mc) + check_production(view, a, c.kb, mc):
+            if f.kind == "violation":
+                c.check(f"{f.topic}.rule", False, f.topic, f.message)
+            elif f.kind == "unchecked":
+                c.skip(f.message)
+            else:
+                c.warn(f.topic, f.message)
+        if a.invade:
+            c.checked.append("invasion_commit")  # the results (space cannon defense, ground combat) are dice, not legality
+        if a.produce:
+            c.checked += ["production_limit", "production_cost", "production_placement"]
+    elif a.invade or a.produce:
+        c.skip("invasion and production (not checked because of the violations above)")
 
 
 def _pass(c: _Checker, a: Pass) -> None:
@@ -252,7 +294,18 @@ def _strategic(c: _Checker, a: StrategicAction) -> None:
             "strategic_action",
             f"{a.player} has already resolved the primary ability of {a.card} this round.",
         )
-    c.skip(f"primary ability choices for {a.card}")
+    if c.violations:
+        return
+    from warlord.engine.strategy_cards import check_primary
+
+    for f in check_primary(c.view, c.kb, a):
+        if f.kind == "violation":
+            c.check(f"primary.{f.topic}", False, f.topic, f.message)
+        elif f.kind == "unchecked":
+            c.skip(f.message)
+        else:
+            c.warn(f.topic, f.message)
+    c.checked.append("primary_choices")
 
 
 def _component(c: _Checker, a: ComponentAction) -> None:
@@ -319,7 +372,7 @@ _HANDLERS = {
 
 
 def validate_action(
-    view: PerspectiveView, action: dict, resolve_refs: RefResolver = _no_refs
+    view: PerspectiveView, action: dict, resolve_refs: RefResolver = _no_refs, kb=None
 ) -> ValidationResult:
     try:
         parsed = parse_action(action)
@@ -327,23 +380,39 @@ def validate_action(
         errs = [f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()]
         return ValidationResult(None, "text_only", schema_errors=errs,
                                 unchecked=["the action is malformed; fix the schema errors first"])
-    c = _Checker(view, resolve_refs)
+    c = _Checker(view, resolve_refs, kb)
     if c.player_exists(parsed.player):
         _HANDLERS[type(parsed)](c, parsed)  # type: ignore[operator]
     return c.result()
 
 
 def kb_ref_resolver(kb, ruleset=None, overrides: dict[str, list[str]] | None = None) -> RefResolver:
-    """Resolve engine topics to rule ids: explicit overrides first, else best rule match."""
+    """Resolve engine topics to rule ids.
+
+    Pinned ids (``overrides``, e.g. warlord/data/lrr_refs.json) win when the knowledge
+    base holds them; otherwise the best-matching rule chunks are used.
+    """
     overrides = overrides or {}
     cache: dict[str, list[str]] = {}
 
     def resolve(topic: str) -> list[str]:
-        if topic in overrides:
-            return list(overrides[topic])
+        pinned = [r for r in overrides.get(topic, []) if r in kb]
+        if pinned:
+            return pinned
         if topic not in cache:
             hits = kb.rules_lookup(TOPICS.get(topic, topic), ruleset=ruleset, k=2)["results"]
             cache[topic] = [h["id"] for h in hits if h.get("kind") == "rule"][:2]
         return cache[topic]
 
     return resolve
+
+
+def load_ref_overrides(path) -> dict[str, list[str]]:
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.exists():
+        return {}
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return {k: list(v) for k, v in data.items() if not k.startswith("_")}

@@ -12,10 +12,16 @@ def test_activation_without_moves_is_fully_checked(view):
     assert r.legal is True and r.coverage == "engine"
 
 
-def test_moves_leave_unchecked_aspects(view):
+def test_reachable_move_is_engine_verified(view):
+    # Carrier II (move 2) from 102 via 101 to 201, carrying 2 fighters and 2 infantry (capacity 6).
     r = validate_action(view, tactical(moves=[{"from": "102", "units": {"carrier": 1, "fighter": 2, "infantry": 2}}]))
-    assert r.legal is None and r.coverage == "text_only"
-    assert any("capacity" in u for u in r.unchecked)
+    assert r.legal is True and r.coverage == "engine" and r.unchecked == []
+
+
+def test_invasion_is_still_unchecked(view):
+    r = validate_action(view, tactical(moves=[{"from": "102", "units": {"carrier": 1, "infantry": 2}}],
+                                       invade=[{"planet": "quann", "infantry": 2}]))
+    assert r.legal is None and any("invasion" in u for u in r.unchecked)
 
 
 def test_cannot_move_out_of_activated_system(view):
@@ -37,7 +43,7 @@ def test_units_must_be_present(view):
 
 def test_ground_forces_on_planets_can_be_picked_up(view):
     r = validate_action(view, tactical(moves=[{"from": "102", "units": {"carrier": 1, "infantry": 2}}]))
-    assert r.legal is None  # not illegal; capacity etc. unchecked
+    assert r.legal is True  # the 2 infantry come off Wellon, a planet in 102
 
 
 def test_not_your_turn(view):

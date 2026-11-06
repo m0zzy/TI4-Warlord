@@ -56,3 +56,41 @@ def test_sustain_damage_absorbs_hits():
     healthy = combat_sim({"units": {"dreadnought": 1}}, {"units": {"cruiser": 1}}, seed=2, trials=3000)
     damaged = combat_sim({"units": {"dreadnought": 1}, "damaged": {"dreadnought": 1}}, {"units": {"cruiser": 1}}, seed=2, trials=3000)
     assert healthy["attacker_win"] > damaged["attacker_win"]
+
+
+def test_ground_combat_basics():
+    from warlord.engine.combat import ground_combat_sim
+
+    strong = ground_combat_sim({"units": {"infantry": 4}}, {"units": {"infantry": 1}}, seed=1, trials=2000)
+    assert strong["attacker_takes_planet"] > 0.95
+    shield = ground_combat_sim({"units": {"infantry": 2}}, {"units": {"infantry": 2, "pds": 1}},
+                               bombard={"units": {"dreadnought": 2}}, seed=1, trials=500)
+    assert shield["bombardment"] == "blocked by Planetary Shield"
+    sun = ground_combat_sim({"units": {"infantry": 2}}, {"units": {"infantry": 2, "pds": 1}},
+                            bombard={"units": {"war_sun": 1}}, seed=1, trials=2000)
+    assert sun["bombardment"].endswith("expected hits")
+    no_pds = ground_combat_sim({"units": {"infantry": 2}}, {"units": {"infantry": 2, "pds": 1}}, seed=2, trials=3000)
+    pds_off = ground_combat_sim({"units": {"infantry": 2}}, {"units": {"infantry": 2, "pds": 1}},
+                                space_cannon_defense=False, seed=2, trials=3000)
+    assert no_pds["attacker_takes_planet"] < pds_off["attacker_takes_planet"]  # space cannon defense hurts
+
+
+def test_combat_from_game(kb, store):
+    import json
+
+    from warlord.tools.registry import ToolContext, run_tool
+
+    ctx = ToolContext(kb=kb, store=store, game_id="pbd00000", viewer="p3")
+    out, err = run_tool(ctx, "combat_sim", {"from_game": {"system": "201", "attacker_units": {"carrier": 1, "dreadnought": 1}},
+                                            "trials": 500, "seed": 1})
+    data = json.loads(out)
+    assert not err and data["inputs"]["defender"]["units"] == {"destroyer": 1, "fighter": 1}
+    assert data["inputs"]["defender_space_cannon"] == {"pds": 1}  # the PDS on Quann fires at the attackers
+    assert data["inputs"]["attacker"]["upgrades"] == ["carrier_2"]
+    out, err = run_tool(ctx, "combat_sim", {"from_game": {"system": "201", "kind": "ground", "planet": "quann",
+                                                          "attacker_units": {"infantry": 3},
+                                                          "bombard_units": {"dreadnought": 1}}, "trials": 500, "seed": 1})
+    data = json.loads(out)
+    assert not err and data["kind"] == "ground" and data["bombardment"] == "blocked by Planetary Shield"
+    _, err = run_tool(ctx, "combat_sim", {"from_game": {"system": "102"}})
+    assert err  # nobody to fight there

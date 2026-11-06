@@ -125,13 +125,22 @@ class HiddenCounts(_Model):
 
 
 class PrivateHoldings(_Model):
-    """What only the owning player can see. Omniscient state only."""
+    """What only the owning player can see. Omniscient state only.
+
+    When a game comes from public data, nobody's hand is known: ``known`` is
+    False, the lists are empty (or hold only what the player entered for
+    themselves), and ``counts`` carries the public hand sizes.
+    """
 
     action_cards: list[str] = Field(default_factory=list)
     promissory_notes: list[str] = Field(default_factory=list)
     secret_objectives: list[str] = Field(default_factory=list)  # unscored
+    known: bool = True
+    public_counts: HiddenCounts | None = None
 
     def counts(self) -> HiddenCounts:
+        if self.public_counts is not None:
+            return self.public_counts
         return HiddenCounts(
             action_cards=len(self.action_cards),
             promissory_notes=len(self.promissory_notes),
@@ -182,11 +191,12 @@ class PlayerView(_PlayerCommon):
 class ObjectivesState(_Model):
     public_revealed: list[str] = Field(default_factory=list)
     public_unrevealed: list[str] = Field(default_factory=list)  # hidden deck order
+    unrevealed_known: bool = True  # False when imported from public data
 
 
 class ObjectivesView(_Model):
     public_revealed: list[str] = Field(default_factory=list)
-    public_unrevealed: int = 0
+    public_unrevealed: int | None = 0  # None when unknown (public data)
 
 
 class LawInPlay(_Model):
@@ -212,7 +222,9 @@ class LogEvent(_Model):
 
 class Meta(_Model):
     game_id: str
-    source: Literal["asyncti4", "manual", "engine", "test"] = "manual"
+    # "asyncti4_export" games carry every player's hidden cards; the MCP server
+    # never opens them.
+    source: Literal["asyncti4", "asyncti4_export", "manual", "engine", "test"] = "manual"
     players: int
     vp_target: int = 10
 
@@ -240,11 +252,16 @@ class GameState(_Model):
 
 
 class Hand(_Model):
-    """The viewing player's own hidden cards."""
+    """The viewing player's own hidden cards.
+
+    ``known`` is False when the game came from public data and the player has
+    not entered their hand; the agent must then ask rather than assume.
+    """
 
     action_cards: list[str] = Field(default_factory=list)
     promissory_notes: list[str] = Field(default_factory=list)
     secret_objectives: list[str] = Field(default_factory=list)
+    known: bool = True
 
 
 class PerspectiveView(_Model):

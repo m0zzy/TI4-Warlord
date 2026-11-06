@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 
 from warlord.kb.records import (
     ComponentCard,
+    Deck,
     ErrataPatch,
     Record,
     RuleChunk,
@@ -22,7 +23,7 @@ from warlord.kb.records import (
 from warlord.kb.search import BM25, Embedder, cosine, name_similarity, rrf
 from warlord.ruleset import Ruleset
 
-_ANY = TypeAdapter(RuleChunk | ComponentCard | Ruling | StrategyNote | ErrataPatch)
+_ANY = TypeAdapter(RuleChunk | ComponentCard | Ruling | StrategyNote | ErrataPatch | Deck)
 
 
 class DuplicateRecord(ValueError):
@@ -48,11 +49,14 @@ class Hit:
 class KnowledgeBase:
     records: dict[str, Record] = field(default_factory=dict)
     errata: list[ErrataPatch] = field(default_factory=list)
+    decks: dict[str, Deck] = field(default_factory=dict)
     embedder: Embedder | None = None
 
     _index_ids: list[str] = field(default_factory=list, init=False, repr=False)
     _bm25: BM25 | None = field(default=None, init=False, repr=False)
     _vectors: list[list[float]] | None = field(default=None, init=False, repr=False)
+    _deck_sets: dict[str, frozenset[str]] = field(default_factory=dict, init=False, repr=False)
+    _supersession: dict[str, list[str]] | None = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------ loading
 
@@ -67,18 +71,25 @@ class KnowledgeBase:
         kb.finalize()
         return kb
 
-    def add(self, item: Record | ErrataPatch | dict) -> None:
+    def add(self, item: Record | ErrataPatch | Deck | dict) -> None:
         if isinstance(item, dict):
             item = _ANY.validate_python(item)
         if isinstance(item, ErrataPatch):
             self.errata.append(item)
             return
+        if isinstance(item, Deck):
+            if item.id in self.decks:
+                raise DuplicateRecord(item.id)
+            self.decks[item.id] = item
+            self._deck_sets.pop(item.id, None)
+            return
         if item.id in self.records:
             raise DuplicateRecord(item.id)
         self.records[item.id] = item
         self._bm25 = None
+        self._supersession = None
 
-    def add_many(self, items: Iterable[Record | ErrataPatch | dict]) -> None:
+    def add_many(self, items: Iterable[Record | ErrataPatch | Deck | dict]) -> None:
         for item in items:
             self.add(item)
 
@@ -109,7 +120,52 @@ class KnowledgeBase:
         return record_id in self.records
 
     def _allowed(self, record: Record, ruleset: Ruleset | None) -> bool:
-        return ruleset is None or ruleset.allows(record.ruleset)
+        if ruleset is None:
+            return True
+        if not ruleset.allows(record.ruleset):
+            return False
+        if not self._in_content(record, ruleset):
+            return False
+        # Hide older printings when a newer one is part of this game's content.
+        for newer in self._superseded_by().get(record.id, ()):
+            rec = self.records.get(newer)
+            if rec is not None and self._in_content(rec, ruleset):
+                return False
+        return True
+
+    def _in_content(self, record: Record, ruleset: Ruleset) -> bool:
+        """Tag and deck checks, without supersession."""
+        if not ruleset.allows(record.ruleset):
+            return False
+        if isinstance(record, ComponentCard) and record.faction is None:
+            loaded = [d for d in ruleset.deck_ids(record.type) if d in self.decks]
+            if loaded:
+                return any(record.id in self._deck_set(d) for d in loaded)
+        return True
+
+    def _superseded_by(self) -> dict[str, list[str]]:
+        """older id -> newer ids, following chains (a -> b -> c gives a: [b, c])."""
+        if self._supersession is None:
+            direct: dict[str, list[str]] = {}
+            for r in self.records.values():
+                for old in getattr(r, "supersedes", []) or []:
+                    direct.setdefault(old, []).append(r.id)
+            full: dict[str, list[str]] = {}
+            for old in direct:
+                seen, stack = [], list(direct[old])
+                while stack:
+                    n = stack.pop()
+                    if n not in seen:
+                        seen.append(n)
+                        stack.extend(direct.get(n, []))
+                full[old] = seen
+            self._supersession = full
+        return self._supersession
+
+    def _deck_set(self, deck_id: str) -> frozenset[str]:
+        if deck_id not in self._deck_sets:
+            self._deck_sets[deck_id] = frozenset(self.decks[deck_id].cards)
+        return self._deck_sets[deck_id]
 
     def search(
         self,
@@ -190,20 +246,42 @@ class KnowledgeBase:
                 for r in self.records.values()
                 if isinstance(r, ComponentCard) and self._allowed(r, ruleset)
             ),
-            key=lambda t: -t[0],
+            # Ties go to cards over map tiles: "Quann" the planet, not tile 25.
+            key=lambda t: (-t[0], t[1].type == "tile"),
         )
         scored = [(s, r) for s, r in scored if s >= 0.55][:k]
+        excluded = self._excluded_match(name_or_id, ruleset) if (not scored or scored[0][0] < 0.9) else None
         if not scored:
-            return {"match": None, "alternatives": [], "note": f"No component matches {name_or_id!r}."}
-        best_score, best = scored[0]
-        alternatives = [
-            {"id": r.id, "name": r.name, "type": r.type, "similarity": round(s, 3)}
-            for s, r in scored[1:]
-        ]
-        result = {"match": Hit(best, best_score).to_dict(text_limit=None), "alternatives": alternatives}
-        if best_score < 0.8:
-            result["note"] = "Low-confidence name match; confirm the card with the player."
+            result: dict = {"match": None, "alternatives": [], "note": f"No component matches {name_or_id!r}."}
+        else:
+            best_score, best = scored[0]
+            alternatives = [
+                {"id": r.id, "name": r.name, "type": r.type, "similarity": round(s, 3)}
+                for s, r in scored[1:]
+            ]
+            result = {"match": Hit(best, best_score).to_dict(text_limit=None), "alternatives": alternatives}
+            if best_score < 0.8:
+                result["note"] = "Low-confidence name match; confirm the card with the player."
+        if excluded is not None:
+            result["not_in_this_game"] = {
+                "id": excluded.id,
+                "name": excluded.name,
+                "ruleset": excluded.ruleset,
+                "note": "This card exists but is not part of this game's content (expansion or deck).",
+            }
         return result
+
+    def _excluded_match(self, name: str, ruleset: Ruleset | None) -> ComponentCard | None:
+        """A near-exact name match that the ruleset filtered out, if any."""
+        if ruleset is None:
+            return None
+        best: tuple[float, ComponentCard] | None = None
+        for r in self.records.values():
+            if isinstance(r, ComponentCard) and not self._allowed(r, ruleset):
+                sim = max(name_similarity(name, n) for n in _names(r))
+                if sim >= 0.9 and (best is None or sim > best[0]):
+                    best = (sim, r)
+        return best[1] if best else None
 
     def strategy_lookup(
         self, query: str, faction: str | None = None, ruleset: Ruleset | None = None, k: int = 4

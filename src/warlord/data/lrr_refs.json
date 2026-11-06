@@ -1,0 +1,62 @@
+{
+  "_comment": "Engine rule topics -> Living Rules Reference 2.0 rule ids. Ids only, no rule text. Used when the LRR is loaded; otherwise the engine falls back to search.",
+  "action_phase": [
+    "lrr.3.1",
+    "lrr.3"
+  ],
+  "passing": [
+    "lrr.3.4",
+    "lrr.82.2"
+  ],
+  "tactical.activation": [
+    "lrr.89.1"
+  ],
+  "movement.origin": [
+    "lrr.89.2"
+  ],
+  "movement.units_present": [
+    "lrr.58.4",
+    "lrr.89.2"
+  ],
+  "strategic_action": [
+    "lrr.82",
+    "lrr.82.2"
+  ],
+  "timing.windows": [
+    "lrr.1.15",
+    "lrr.1.14",
+    "lrr.2.6"
+  ],
+  "movement.range": [
+    "lrr.58.4"
+  ],
+  "movement.gravity_rift": [
+    "lrr.41.1",
+    "lrr.41.2"
+  ],
+  "transport.capacity": [
+    "lrr.95",
+    "lrr.16.1"
+  ],
+  "capacity.excess": [
+    "lrr.16.3"
+  ],
+  "fleet_pool": [
+    "lrr.37.1",
+    "lrr.37.3"
+  ],
+  "invasion": [
+    "lrr.49.2"
+  ],
+  "production": [
+    "lrr.68.1",
+    "lrr.67.6"
+  ],
+  "production.cost": [
+    "lrr.67.1",
+    "lrr.67.2"
+  ],
+  "production.reinforcements": [
+    "lrr.67.5"
+  ]
+}

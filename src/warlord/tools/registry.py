@@ -19,6 +19,7 @@ from typing import Any, Callable
 from warlord.engine.combat import combat_sim
 from warlord.engine.validate import RefResolver, kb_ref_resolver, validate_action
 from warlord.kb.store import KnowledgeBase
+from warlord.ruleset import Ruleset
 from warlord.state.schema import PerspectiveView
 from warlord.state.store import GameNotFound, GameStore
 
@@ -33,6 +34,7 @@ class ToolContext:
     store: GameStore | None = None
     game_id: str | None = None
     viewer: str | None = None
+    default_ruleset: Ruleset | None = None  # used when no game is attached
     ref_overrides: dict[str, list[str]] = field(default_factory=dict)
 
     # Session record.
@@ -51,9 +53,9 @@ class ToolContext:
                 raise ToolError(f"Game {self.game_id!r} not found.") from e
         return self._view
 
-    def ruleset(self):
+    def ruleset(self) -> Ruleset | None:
         v = self.view()
-        return v.ruleset if v else None
+        return v.ruleset if v else self.default_ruleset
 
     def resolver(self) -> RefResolver:
         if self._resolver is None:
@@ -129,25 +131,157 @@ def _validate_action(ctx: ToolContext, args: dict) -> dict:
         raise ToolError("action must be an object in the canonical action format")
     if "player" not in action:
         action = {**action, "player": view.turn.active_player or ctx.viewer}
-    result = validate_action(view, action, ctx.resolver()).to_dict()
+    result = validate_action(view, action, ctx.resolver(), ctx.kb).to_dict()
+    result["status_line"] = status_line(result)
     ctx.coverage.append({"tool": "validate_action", "coverage": result["coverage"], "legal": result["legal"]})
     return result
 
 
+def status_line(result: dict) -> str:
+    """One line the agent can repeat to the player as-is."""
+    if result.get("schema_errors"):
+        return "Not checked: the move is not in the engine's action format."
+    if result["legal"] is False:
+        v = result["violations"][0]
+        refs = f" ({', '.join(v['refs'])})" if v.get("refs") else ""
+        more = f" (+{len(result['violations']) - 1} more)" if len(result["violations"]) > 1 else ""
+        return f"Illegal, engine-verified: {v['message']}{refs}{more}"
+    warn = ""
+    if result.get("warnings"):
+        warn = " Note: " + " ".join(w["message"] for w in result["warnings"])
+    if result["legal"] is True:
+        return "Legal, engine-verified." + warn
+    return "Not verified by the engine. Unchecked: " + "; ".join(result.get("unchecked") or ["unknown"]) + "." + warn
+
+
 def _combat_sim(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.combat import ground_combat_sim
+    from warlord.engine.combat_setup import SetupError, describe, sides_from_game
+
+    trials = int(args.get("trials") or 5000)
+    game = args.get("from_game")
     try:
-        result = combat_sim(
-            args["attacker"],
-            args["defender"],
-            trials=int(args.get("trials") or 5000),
-            space_cannon=bool(args.get("space_cannon", True)),
-            afb=bool(args.get("afb", True)),
-            seed=args.get("seed"),
-        )
+        if game:
+            view = ctx.view()
+            if view is None:
+                raise ToolError("from_game needs an open game.")
+            setup = sides_from_game(
+                view, ctx.kb, game.get("system", ""), game.get("attacker"), game.get("defender"),
+                game.get("attacker_units"), game.get("kind", "space"), game.get("planet"), game.get("bombard_units"),
+            )
+            if setup["kind"] == "ground":
+                result = ground_combat_sim(setup["attacker"], setup["defender"], bombard=setup["bombard"],
+                                           trials=trials, seed=args.get("seed"))
+            else:
+                result = combat_sim(setup["attacker"], setup["defender"], trials=trials,
+                                    space_cannon=bool(args.get("space_cannon", True)), afb=bool(args.get("afb", True)),
+                                    seed=args.get("seed"))
+            result["inputs"] = {
+                **setup["who"],
+                "attacker": describe(setup["attacker"]),
+                "defender": describe(setup["defender"]),
+                **({"bombard": describe(setup["bombard"])} if setup.get("bombard") else {}),
+            }
+        elif args.get("kind") == "ground":
+            result = ground_combat_sim(args["attacker"], args["defender"], bombard=args.get("bombard"),
+                                       trials=trials, seed=args.get("seed"))
+        else:
+            result = combat_sim(
+                args["attacker"],
+                args["defender"],
+                trials=trials,
+                space_cannon=bool(args.get("space_cannon", True)),
+                afb=bool(args.get("afb", True)),
+                seed=args.get("seed"),
+            )
+    except SetupError as e:
+        raise ToolError(str(e)) from e
     except (KeyError, TypeError, ValueError) as e:
         raise ToolError(f"bad combat_sim input: {e}") from e
     ctx.coverage.append({"tool": "combat_sim", "coverage": "engine"})
     return result
+
+
+def _seat(ctx: ToolContext, args: dict) -> str:
+    view = ctx.view()
+    if view is None:
+        raise ToolError("No game is open.")
+    player = args.get("player") or ctx.viewer
+    if player not in view.players:
+        raise ToolError(f"No seat {player!r}. Seats: {', '.join(sorted(view.players))}.")
+    return player
+
+
+def _legal_actions(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.options import legal_actions
+
+    player = _seat(ctx, args)
+    result = legal_actions(ctx.view(), ctx.kb, player)
+    ctx.coverage.append({"tool": "legal_actions", "coverage": "engine"})
+    return result
+
+
+def _diff(before: dict, after: dict) -> dict:
+    """What changed between two dumped perspective views."""
+    out: dict = {}
+    old_map = {s["position"]: s for s in before.get("map", [])}
+    changed = [s for s in after.get("map", []) if old_map.get(s["position"]) != s]
+    if changed:
+        out["systems"] = changed
+    players = {}
+    for pid, p in after.get("players", {}).items():
+        fields = {k: v for k, v in p.items() if before["players"].get(pid, {}).get(k) != v}
+        if fields:
+            players[pid] = fields
+    if players:
+        out["players"] = players
+    turn = {k: v for k, v in after.get("turn", {}).items() if before.get("turn", {}).get(k) != v}
+    if turn:
+        out["turn"] = turn
+    if after.get("hand") != before.get("hand"):
+        out["hand"] = after.get("hand")
+    return out
+
+
+def _apply_action(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.apply import ApplyRefused, HiddenInformation, apply_action
+    from warlord.state.perspective import project
+
+    if ctx.store is None or ctx.game_id is None:
+        raise ToolError("No game is open.")
+    action = args.get("action")
+    if not isinstance(action, dict):
+        raise ToolError("action must be an object in the canonical action format")
+    state = ctx.store.load(ctx.game_id)
+    try:
+        result = apply_action(state, action, ctx.kb, viewer=ctx.viewer)
+    except ApplyRefused as e:
+        return {"applied": False, "illegal": [v.to_dict() for v in e.violations]}
+    except HiddenInformation as e:
+        raise ToolError(str(e)) from e
+    except (KeyError, ValueError) as e:
+        raise ToolError(f"could not apply the action: {e}") from e
+    before = project(state, ctx.viewer).model_dump(mode="json", exclude={"log"})
+    after = project(result["state"], ctx.viewer).model_dump(mode="json", exclude={"log"})
+    ctx.coverage.append({"tool": "apply_action", "coverage": "engine" if result["verified"] else "text_only"})
+    return {
+        "applied": True,
+        "what_if": "Nothing was saved; this shows the state after the action.",
+        "verified": result["verified"],
+        "unchecked": result["unchecked"],
+        "warnings": result["warnings"],
+        "events": result["events"],
+        "pending": result["pending"],
+        "not_applied": result["not_applied"],
+        "changes": _diff(before, after),
+    }
+
+
+def _evaluate_position(ctx: ToolContext, args: dict) -> dict:
+    from warlord.engine.evaluate import evaluate_position
+
+    player = _seat(ctx, args)
+    return evaluate_position(ctx.view(), ctx.kb, player)
 
 
 def _not_yet(name: str) -> Callable[[ToolContext, dict], dict]:
@@ -217,36 +351,41 @@ TOOL_DEFS: dict[str, dict] = {
             "properties": {
                 "action": {
                     "type": "object",
-                    "description": 'Canonical action. Tactical: {"type":"tactical","player":"p3","activate":"201","moves":[{"from":"102","units":{"carrier":1,"infantry":2}}],"invade":[{"planet":"quann","infantry":2}],"produce":[]}. Others: {"type":"strategic","player","card","primary"}, {"type":"component","player","source"}, {"type":"transaction","player","with_player","give","receive"}, {"type":"pass","player"}, {"type":"respond","player","play"} (play null declines).',
+                    "description": 'Canonical action. Tactical: {"type":"tactical","player":"p3","activate":"201","moves":[{"from":"102","units":{"carrier":1,"infantry":2}}],"invade":[{"planet":"quann","infantry":2}],"produce":[]}. Strategic: {"type":"strategic","player","card","primary":{...}} where primary is, by card: Leadership {"influence_from":[planet],"trade_goods":n,"tokens":{"tactic":a,"fleet":b,"strategy":c}}; Diplomacy {"system":pos,"ready":[planet]}; Politics {"speaker":player}; Construction {"place":[{"structure":"pds"|"space_dock","planet":p}, ...]}; Trade {"chosen_players":[player]}; Warfare (PoK) {"remove_token_from":pos,"to_pool":pool} or (Thunder Edge version) {"tactical":{...tactical action...}}; Technology {"research":[tech id],"specialties":[planet],"pay_with":[planet|"tg:N"]}; Imperial {"score":objective id}. Others, {"type":"component","player","source"}, {"type":"transaction","player","with_player","give","receive"}, {"type":"pass","player"}, {"type":"respond","player","play"} (play null declines).',
                 }
             },
             "required": ["action"],
         },
     },
     "combat_sim": {
-        "description": "Monte Carlo space combat odds: win/draw/loss, expected survivors, hits needed and expected hits per round. Models space cannon offense, anti-fighter barrage, Sustain Damage and combat rounds; not retreats or card effects beyond modifiers. Always use this instead of estimating odds.",
+        "description": "Monte Carlo combat odds. Space combat models space cannon offense, anti-fighter barrage, Sustain Damage and combat rounds. Ground combat (kind 'ground') models bombardment, planetary shields, space cannon defense, Sustain Damage and combat rounds. Neither models retreats or card effects beyond modifiers. Prefer from_game, which reads both sides from the open game (units, damage, upgrades, faction units, PDS including adjacent PDS II), e.g. {\"system\":\"201\",\"attacker_units\":{\"dreadnought\":2,\"carrier\":1}} for a planned attack, or {\"system\":\"201\",\"kind\":\"ground\",\"planet\":\"quann\",\"attacker_units\":{\"infantry\":3}}. Always use this instead of estimating odds.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "from_game": {
+                    "type": "object",
+                    "description": "Read the sides from the open game: system, optional attacker/defender seats, attacker_units (the units that would arrive), kind ('space' or 'ground'), planet and bombard_units (the attacker's ships there) for ground.",
+                },
                 "attacker": _SIDE,
                 "defender": _SIDE,
+                "bombard": {**_SIDE, "description": "Ground combat: the attacker's ships in the system, for bombardment."},
+                "kind": {"type": "string", "enum": ["space", "ground"]},
                 "trials": {"type": "integer", "minimum": 100, "maximum": 50000},
                 "space_cannon": {"type": "boolean"},
                 "afb": {"type": "boolean"},
             },
-            "required": ["attacker", "defender"],
         },
     },
     "legal_actions": {
-        "description": "Option families available to a player now: activatable systems with reachable units, unused strategy cards, component actions, responses to the open window, and whether passing is allowed.",
+        "description": "Option families available to a player now: systems they can activate, with the ship groups that can reach each one; unused strategy cards; component actions; responses to the open window; and whether passing is allowed (and why not). Draft a concrete action from an option, then run validate_action on it.",
         "input_schema": {"type": "object", "properties": {"player": {"type": "string"}}},
     },
     "apply_action": {
-        "description": "Apply an action to a copy of the state and return the next state and event log, for what-if questions.",
+        "description": "What-if: apply an action to a copy of the game (nothing is saved). Returns what changed, the events, and what is pending, such as a space combat or ground combat to resolve with combat_sim. Card effects the engine doesn't model are listed under not_applied. Illegal actions are refused with the violations.",
         "input_schema": {"type": "object", "properties": {"action": {"type": "object"}}, "required": ["action"]},
     },
     "evaluate_position": {
-        "description": "Heuristic position summary for a player: objective progress, VP race, threats, resources and influence available.",
+        "description": "Heuristic summary of a player's position, from the asking player's view: the VP race, each revealed public objective with whether the player could score it now and how far off they are, spending power (ready resources and influence, trade goods, command tokens), and threats (other players' ships that could reach the player's systems next turn, with expected hits). Not a verdict: weigh it.",
         "input_schema": {"type": "object", "properties": {"player": {"type": "string"}}},
     },
 }
@@ -257,13 +396,14 @@ HANDLERS: dict[str, Callable[[ToolContext, dict], dict]] = {
     "card_lookup": _card_lookup,
     "validate_action": _validate_action,
     "combat_sim": _combat_sim,
-    "legal_actions": _not_yet("legal_actions"),
-    "apply_action": _not_yet("apply_action"),
-    "evaluate_position": _not_yet("evaluate_position"),
+    "legal_actions": _legal_actions,
+    "apply_action": _apply_action,
+    "evaluate_position": _evaluate_position,
 }
 
 IMPLEMENTED = ("get_state", "rules_lookup", "card_lookup", "validate_action", "combat_sim")
-REFEREE_TOOLS = IMPLEMENTED  # the advisor will add legal_actions, apply_action, evaluate_position
+REFEREE_TOOLS = IMPLEMENTED
+ADVISOR_TOOLS = (*IMPLEMENTED, "legal_actions", "apply_action", "evaluate_position")
 
 
 def tool_definitions(names=REFEREE_TOOLS) -> list[dict]:
