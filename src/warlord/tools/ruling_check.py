@@ -16,6 +16,7 @@ information is enforced at the source instead: the agent is never given it.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from warlord.agent.quotes import MAX_QUOTE_WORDS, long_quotes
@@ -34,13 +35,25 @@ def source_texts(ctx: ToolContext) -> list[str]:
     return texts
 
 
+_CLAUSE = re.compile(r"^(lrr\.\d+\.\d+)\(?([a-z])\)?$")
+
+
+def base_id(cid: str) -> str:
+    """'lrr.58.4c' or 'lrr.58.4(c)' (rule 58.4, clause c) -> 'lrr.58.4'. Other ids are unchanged."""
+    m = _CLAUSE.match(cid)
+    return m.group(1) if m else cid
+
+
 def partition_citations(ctx: ToolContext, ids: Iterable[str]) -> tuple[list[str], list[str], list[str]]:
-    """(backed by a lookup this session, exists but not looked up, unknown id)."""
+    """(backed by a lookup this session, exists but not looked up, unknown id).
+
+    A clause citation such as lrr.58.4c counts as its rule, lrr.58.4.
+    """
     backed, not_looked_up, unknown = [], [], []
     for cid in ids:
-        if cid in ctx.seen_ids:
+        if base_id(cid) in ctx.seen_ids:
             backed.append(cid)
-        elif cid in ctx.kb:
+        elif base_id(cid) in ctx.kb:
             not_looked_up.append(cid)
         else:
             unknown.append(cid)

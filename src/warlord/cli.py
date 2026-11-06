@@ -171,12 +171,31 @@ def cmd_eval(args) -> int:
     questions = kit.load_questions()
     if args.kind:
         questions = [q for q in questions if q["kind"] == args.kind]
+    if args.ids:
+        wanted = set(args.ids.split(","))
+        questions = [q for q in questions if q["id"] in wanted]
+    if args.limit:
+        questions = questions[: args.limit]
     if args.eval_cmd == "questions":
         print(kit.questions_markdown(questions, with_answers=args.answers))
     elif args.eval_cmd == "install":
         print(f"Installed the eval game at {kit.install_game(data_dir(args.data))}")
     elif args.eval_cmd == "template":
         print(f"Wrote {kit.write_template(questions, Path(args.file))}")
+    elif args.eval_cmd == "run":
+        from warlord.evals import runner
+
+        data = data_dir(args.data)
+        if not (data / "games" / kit.EVAL_GAME.name).exists():
+            kit.install_game(data)
+        print(json.dumps(runner.run(questions, Path(args.file), data, model=args.model, rerun=args.rerun), indent=2))
+    elif args.eval_cmd == "grade":
+        from warlord.evals import runner
+
+        if args.judge:
+            print(json.dumps(runner.judge(questions, Path(args.file), model=args.model), indent=2))
+        else:
+            print(json.dumps(runner.grade(questions, Path(args.file)), indent=2))
     elif args.eval_cmd == "score":
         answers = [json.loads(line) for line in Path(args.file).read_text(encoding="utf-8").splitlines() if line.strip()]
         files = sorted(kb_dir(data_dir(args.data)).glob("*.jsonl"))
@@ -276,12 +295,17 @@ def build_parser() -> argparse.ArgumentParser:
     m.set_defaults(func=cmd_mcp)
 
     e = sub.add_parser("eval", help="manual eval kit: questions, answer template, scoring")
-    e.add_argument("eval_cmd", choices=["questions", "install", "template", "score"])
+    e.add_argument("eval_cmd", choices=["questions", "install", "template", "run", "grade", "score"])
     e.add_argument("file", nargs="?", default="answers.jsonl", help="answers file (template/score)")
     e.add_argument("--kind", choices=["rules", "legality"])
     e.add_argument("--answers", action="store_true", help="questions: include gold answers, for review")
     e.add_argument("--data", help="data folder (default: $WARLORD_DATA or ~/.local/share/warlord)")
     e.add_argument("--json", action="store_true")
+    e.add_argument("--ids", help="run: only these question ids, comma-separated (e.g. a.001,a.043)")
+    e.add_argument("--limit", type=int, help="only the first N questions")
+    e.add_argument("--model", help="run/grade: Claude model alias for claude -p (default: your Claude Code default)")
+    e.add_argument("--rerun", action="store_true", help="run: ask again even where an answer exists")
+    e.add_argument("--judge", action="store_true", help="grade: let Claude compare each answer with the gold answer")
     e.set_defaults(func=cmd_eval)
 
     ds = sub.add_parser("datasets", help="generate example datasets from stored games")

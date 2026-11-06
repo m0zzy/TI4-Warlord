@@ -14,7 +14,42 @@ warlord eval questions --answers > review.md
 
 Read `review.md`. For each question, edit `rules_qa.jsonl`: set `"review"` to `"approved"` or `"rejected"`, and fix any gold answer you disagree with. I checked every rule id against the imported LRR 2.0 and TE rulebook, and checked every legality answer against the engine. The wording and the rulings are still yours to confirm.
 
-## 2. Ask your agent
+## The easy way: let Claude Code run it
+
+If Claude Code is installed and logged in, Warlord can drive it. No API key or copy-pasting is needed:
+
+```bash
+warlord eval run answers.jsonl --limit 10
+```
+
+- **What it does:** sends each question to `claude -p` (Claude Code's headless mode) in a fresh conversation, with only the warlord MCP server connected and the referee instructions added. It saves the final answer, the tools the agent called, the turn count and the cost.
+- **Resuming:** already-answered questions are skipped, so you can stop and resume. `--rerun` asks again.
+- **Choosing questions:** `--ids a.001,a.043` runs specific questions. Leave out `--limit` for all 50; each takes 20 to 40 seconds.
+- **Usage:** it runs on your Claude Code login and counts toward your usage like any other conversation.
+
+Then grade, by hand or with Claude as the judge:
+
+```bash
+warlord eval grade answers.jsonl
+```
+
+This shows each answer next to the gold answer and asks y (correct), n (incorrect), s (skip) or q (quit).
+
+```bash
+warlord eval grade answers.jsonl --judge
+```
+
+This has Claude compare each answer with the gold answer. Your own y/n marks always win over the judge's, so you can spot-check the judge afterwards with plain `warlord eval grade`.
+
+```bash
+warlord eval score answers.jsonl
+```
+
+The score says how many answers were graded by the judge alone.
+
+## The manual way
+
+### 2. Ask your agent
 
 Install the sample game into your data folder, so the legality questions can use it:
 
@@ -30,7 +65,7 @@ warlord eval questions
 
 Ask each one in a fresh conversation in Claude Code or Claude Desktop, with the warlord MCP server connected. The referee prompt tells the agent to cite rule ids, run `check_ruling`, and end with the label.
 
-## 3. Record and score
+### 3. Record and score
 
 ```bash
 warlord eval template answers.jsonl

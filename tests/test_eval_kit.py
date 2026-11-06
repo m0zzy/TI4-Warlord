@@ -57,3 +57,45 @@ def test_score(kb):
     assert m["label_honesty"]["value"] == 0.5  # x2 should be engine-verified
     assert [f["id"] for f in report["failures"]] == ["x2"]
     assert "label_honesty" in kit.score_markdown(report)
+
+
+def test_clause_citations_count_as_their_rule(kb):
+    from warlord.tools.ruling_check import base_id
+
+    assert base_id("lrr.58.4c") == "lrr.58.4" and base_id("lrr.58.4(c)") == "lrr.58.4" and base_id("ac.sabotage") == "ac.sabotage"
+    qs = [{"id": "x", "question": "?", "answer": "", "refs": ["lrr.sample.movement"], "expected_label": "unverified", "kind": "rules"}]
+    from warlord.kb.store import KnowledgeBase
+
+    own = KnowledgeBase()
+    own.add_many(kb.records.values())
+    own.add({"kind": "rule", "id": "lrr.58.4", "ruleset": "base", "title": "Move Ships", "text": "t"})
+    own.finalize()
+    report = kit.score([{"id": "x", "answer": "No (lrr.58.4c, lrr.sample.movement). Unverified.", "correct": True}], qs, own)
+    assert report["metrics"]["citation_validity"]["value"] == 1.0
+
+
+def test_runner_parses_claude_stream(tmp_path):
+    import json as _json
+    from types import SimpleNamespace
+
+    from warlord.evals import runner
+
+    events = [
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "mcp__warlord__rules_lookup"}]}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "thinking aloud"}]}},
+        {"type": "result", "result": "No. (lrr.89.2) Engine-verified.", "num_turns": 3, "total_cost_usd": 0.01, "is_error": False},
+    ]
+    fake = lambda cmd, **kw: SimpleNamespace(stdout="\n".join(_json.dumps(e) for e in events), stderr="", returncode=0)
+    runner._claude = lambda: "claude"
+    qs = [{"id": "a.001", "question": "Q?"}, {"id": "a.002", "question": "Q2?"}]
+    path = tmp_path / "answers.jsonl"
+    assert runner.run(qs, path, tmp_path, runner=fake, progress=lambda *_: None)["asked"] == 2
+    rows = [_json.loads(line) for line in path.read_text().splitlines()]
+    assert rows[0]["answer"] == "No. (lrr.89.2) Engine-verified." and rows[0]["tools_used"] == ["rules_lookup"]
+    assert runner.run(qs, path, tmp_path, runner=fake, progress=lambda *_: None)["asked"] == 0  # already answered
+
+    seq = iter(["y", "n"])
+    gold = [{"id": "a.001", "question": "Q?", "answer": "No", "refs": ["lrr.89.2"], "topic": "t"},
+            {"id": "a.002", "question": "Q2?", "answer": "Yes", "refs": ["lrr.1"], "topic": "t"}]
+    assert runner.grade(gold, path, read=lambda _: next(seq), show=lambda *_: None)["graded"] == 2
+    assert [_json.loads(line)["correct"] for line in path.read_text().splitlines()] == [True, False]

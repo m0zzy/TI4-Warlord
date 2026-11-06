@@ -31,6 +31,7 @@ from pathlib import Path
 from warlord.agent.quotes import long_quotes
 from warlord.kb.store import KnowledgeBase
 from warlord.paths import PACKAGE_DATA, games_dir
+from warlord.tools.ruling_check import base_id
 
 QUESTIONS = PACKAGE_DATA / "evals" / "rules_qa.jsonl"
 EVAL_GAME = PACKAGE_DATA / "evals" / "pbd00000.json"
@@ -127,11 +128,13 @@ def score(answers: list[dict], questions: list[dict], kb: KnowledgeBase | None) 
         text = (a.get("answer") or "").strip()
         if q is None:
             continue
-        s = Scored(id=q["id"], answered=bool(text), correct=a.get("correct"))
+        # Your own mark wins; otherwise the Claude judge's, if it ran.
+        mark = a.get("correct") if a.get("correct") is not None else a.get("judge")
+        s = Scored(id=q["id"], answered=bool(text), correct=mark)
         if text:
             s.cited = cited_ids(text)
-            s.invalid = [c for c in s.cited if kb is not None and c not in kb]
-            s.cites_gold = any(_related(c, g) for c in s.cited for g in q["refs"])
+            s.invalid = [c for c in s.cited if kb is not None and base_id(c) not in kb]
+            s.cites_gold = any(_related(base_id(c), g) for c in s.cited for g in q["refs"])
             s.label = detect_label(text)
             s.label_ok = s.label == q["expected_label"]
             s.long_quotes = len(long_quotes(text, sources)) if sources else 0
@@ -139,6 +142,7 @@ def score(answers: list[dict], questions: list[dict], kb: KnowledgeBase | None) 
 
     answered = [r for r in rows if r.answered]
     graded = [r for r in answered if r.correct is not None]
+    by_judge = sum(1 for a in answers if a.get("correct") is None and a.get("judge") is not None and (a.get("answer") or "").strip())
 
     def rate(xs, ok) -> float | None:
         return round(sum(1 for x in xs if ok(x)) / len(xs), 3) if xs else None
@@ -152,6 +156,7 @@ def score(answers: list[dict], questions: list[dict], kb: KnowledgeBase | None) 
     return {
         "answered": len(answered),
         "graded": len(graded),
+        "graded_by_judge": by_judge,
         "questions": len(questions),
         "metrics": {
             k: {"value": v, "bar": PASS_BARS[k], "meets_bar": None if v is None else v >= PASS_BARS[k]}
@@ -173,7 +178,8 @@ def score(answers: list[dict], questions: list[dict], kb: KnowledgeBase | None) 
 
 
 def score_markdown(report: dict) -> str:
-    lines = [f"Answered {report['answered']} of {report['questions']}; you graded {report['graded']}.", ""]
+    judge = f" ({report['graded_by_judge']} by the Claude judge only)" if report.get("graded_by_judge") else ""
+    lines = [f"Answered {report['answered']} of {report['questions']}; graded {report['graded']}{judge}.", ""]
     lines.append("| Check | Result | Bar | Pass |")
     lines.append("| --- | --- | --- | --- |")
     for name, m in report["metrics"].items():
